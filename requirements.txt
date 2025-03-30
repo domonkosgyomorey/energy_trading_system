@@ -2,3 +2,4 @@ black==25.1.0
 isort==6.0.1
 mypy==1.15.0
 cvxpy==1.6.4
+pandas==2.2.3

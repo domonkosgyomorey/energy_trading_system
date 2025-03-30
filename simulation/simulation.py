@@ -1,8 +1,12 @@
+import os
 from argparse import ArgumentParser
 
-from blockchain import Blockchain
+import pandas as pd
+from config import Config
 from household import Household
 from optimizer import OptimizationModel
+
+from blockchain import Blockchain
 
 if __name__ == "__main__":
 
@@ -24,6 +28,11 @@ if __name__ == "__main__":
     args = parser.parse_args()
     days = args.days
     households_count = args.households
+
+    db_path = os.path.join(Config.DB_PATH, Config.DB)
+
+    db = pd.read_parquet(db_path)
+    print(db.head())
 
     blockchain = Blockchain()
     households = [Household(household_id=i, battery_capacity=10) for i in range(5)]
