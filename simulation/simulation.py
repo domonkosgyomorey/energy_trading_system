@@ -1,42 +1,18 @@
 import os
-from argparse import ArgumentParser
 
-import pandas as pd
+from community import Community
 from config import Config
-from household import Household
 from optimizer import OptimizationModel
 
 from blockchain import Blockchain
 
 if __name__ == "__main__":
 
-    parser = ArgumentParser(
-        description="Simulation of a blockchain-based energy trading system."
-    )
-
-    parser.add_argument(
-        "--days", type=int, default=30, help="Number of days to simulate."
-    )
-
-    parser.add_argument(
-        "--households",
-        type=int,
-        default=5,
-        help="Number of households in the simulation.",
-    )
-
-    args = parser.parse_args()
-    days = args.days
-    households_count = args.households
-
     db_path = os.path.join(Config.DB_PATH, Config.DB)
-
-    db = pd.read_parquet(db_path)
-    print(db.head())
+    community = Community(db_path)
 
     blockchain = Blockchain()
-    households = [Household(household_id=i, battery_capacity=10) for i in range(5)]
-    models = [OptimizationModel(blockchain, h) for h in households]
+    models = [OptimizationModel(blockchain, h) for h in community.households]
 
     days = 7
     total_days = 30
@@ -53,9 +29,11 @@ if __name__ == "__main__":
             print("Cost:", results["cost"])
             print("Buy:", results["buy"])
             print("Sell:", results["sell"])
-            print("Battery Level:", model.household.battery_level)
 
         blockchain.finalize_day(current_day)
 
         reservations = blockchain.get_reservations(current_day)
+        print("Reservations:", reservations)
+        print("Reservations:", reservations)
+        print("Reservations:", reservations)
         print("Reservations:", reservations)
