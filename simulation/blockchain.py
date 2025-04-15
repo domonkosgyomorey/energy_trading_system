@@ -4,14 +4,16 @@ class Blockchain:
         self.pending_offers = (
             []
         )  # Temporary storage for offers before adding to the chain
-        self.offers = {}  # {day: [list of offers]}
-        self.reservations = {}  # {day: {household_id: reserved_offer}}
-        self.used_offers = {}  # Track which offers have been used {day: [offer_ids]}
+        self.offers: dict = {}  # {day: [list of offers]}
+        self.reservations: dict = {}  # {day: {household_id: reserved_offer}}
+        self.used_offers: dict = (
+            {}
+        )  # Track which offers have been used {day: [offer_ids]}
 
-    def add_offer(self, day: int, offer: dict):
+    def add_offer(self, day: int, offer: dict) -> None:
         self.pending_offers.append((day, offer))
 
-    def finalize_day(self, day: int):
+    def finalize_day(self, day: int) -> None:
         for offer_day, offer in self.pending_offers:
             if offer_day not in self.offers:
                 self.offers[offer_day] = []
@@ -28,12 +30,12 @@ class Blockchain:
                         relevant_offers.append((i, offer))
         return relevant_offers
 
-    def reserve_offer(self, day: int, household_id: int, offer_id: int):
+    def reserve_offer(self, day: int, household_id: int, offer_id: int) -> None:
         if day not in self.reservations:
             self.reservations[day] = {}
         self.reservations[day][household_id] = offer_id
 
-    def mark_offer_as_used(self, day: int, offer_id: int):
+    def mark_offer_as_used(self, day: int, offer_id: int) -> None:
         if day not in self.used_offers:
             self.used_offers[day] = []
         self.used_offers[day].append(offer_id)
