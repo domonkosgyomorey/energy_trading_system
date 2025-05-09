@@ -1,18 +1,3 @@
-from typing import Protocol
-
-class BatteryInterface(Protocol):
-    def store_energy(self, amount: float):
-        ...
-
-    def retrieve_energy(self, amount: float) -> float:
-        ...
-
-    def degrade(self):
-        ...
-
-    def status(self) -> dict:
-        ...
-
 class SimpleBattery:
     def __init__(self, capacity: float, efficiency: float):
         self.capacity = capacity
