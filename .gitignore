@@ -6,6 +6,9 @@ __pycache__/
 # C extensions
 *.so
 
+uv.lock
+pyproject.toml
+
 # Distribution / packaging
 .Python
 build/
