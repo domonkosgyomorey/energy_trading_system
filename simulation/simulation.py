@@ -1,39 +1,43 @@
-import os
+from simulation.household import Household
+from simulation.blockchain import Blockchain
+from simulation.forecaster import Forecaster
+from simulation.optimizer import SimpleRuleBasedOptimizer
+from simulation.battery import SimpleBattery
 
-from community import Community
-from config import Config
-from optimizer import OptimizationModel
+class Simulation:
+    def __init__(self, num_households):
+        self.households = [
+            Household(id=i, battery=SimpleBattery(capacity=20.0 + i*5, efficiency=0.9)) if i % 2 == 0 else Household(id=i)
+            for i in range(num_households)
+        ]
+        self.blockchain = Blockchain()
+        self.forecaster = Forecaster()
+        self.optimizer = SimpleRuleBasedOptimizer()
 
-from blockchain import Blockchain
+    def run(self, steps):
+        for step in range(steps):
+            print(f"\n--- Step {step+1} ---")
+            data = [hh.simulate() for hh in self.households]
+            self.blockchain.add_block({"type": "daily_data", "data": data})
+            for d in data:
+                print(f"Household {d['id']}: Prod={d['production']}, Cons={d['consumption']}, Bat={d['battery']}, Tokens={d['tokens']}")
 
-if __name__ == "__main__":
+            # Forecast
+            forecasts = {hh.id: self.forecaster.forecast(hh) for hh in self.households}
+            self.blockchain.add_block({"type": "forecast_data", "data": forecasts})
 
-    db_path = os.path.join(Config.DB_PATH, Config.DB)
-    community = Community(db_path)
+            # Optimization
+            trade_plan = self.optimizer.optimize(self.households, forecasts)
 
-    blockchain = Blockchain()
-    models = [OptimizationModel(blockchain, h) for h in community.households]
+            # Offers on blockchain
+            offers = [trade for trade in trade_plan if trade['type'] == 'offer']
+            requests = [trade for trade in trade_plan if trade['type'] == 'request']
+            self.blockchain.add_block({"type": "offers", "data": offers})
+            self.blockchain.add_block({"type": "requests", "data": requests})
 
-    days = 7
-    total_days = 30
-
-    for current_day in range(total_days):
-        for model in models:
-            forecast_demand, forecast_generation = model.household.make_forecasts(days)
-            results = model.optimize(
-                current_day, days, forecast_demand, forecast_generation
-            )
-            print(
-                f"\nDay {current_day} - Household {model.household.household_id} Optimization results:"
-            )
-            print("Cost:", results["cost"])
-            print("Buy:", results["buy"])
-            print("Sell:", results["sell"])
-
-        blockchain.finalize_day(current_day)
-
-        reservations = blockchain.get_reservations(current_day)
-        print("Reservations:", reservations)
-        print("Reservations:", reservations)
-        print("Reservations:", reservations)
-        print("Reservations:", reservations)
+            print("Offers:")
+            for offer in offers:
+                print(offer)
+            print("Requests:")
+            for req in requests:
+                print(req)

@@ -1,44 +1,29 @@
+import hashlib
+import time
+
+class Block:
+    def __init__(self, index, timestamp, data, previous_hash):
+        self.index = index
+        self.timestamp = timestamp
+        self.data = data
+        self.previous_hash = previous_hash
+        self.hash = self.calculate_hash()
+
+    def calculate_hash(self):
+        block_string = f"{self.index}{self.timestamp}{self.data}{self.previous_hash}"
+        return hashlib.sha256(block_string.encode()).hexdigest()
+
 class Blockchain:
     def __init__(self):
-        self.chain = []
-        self.pending_offers = (
-            []
-        )  # Temporary storage for offers before adding to the chain
-        self.offers: dict = {}  # {day: [list of offers]}
-        self.reservations: dict = {}  # {day: {household_id: reserved_offer}}
-        self.used_offers: dict = (
-            {}
-        )  # Track which offers have been used {day: [offer_ids]}
+        self.chain: List[Block] = [self.create_genesis_block()]
 
-    def add_offer(self, day: int, offer: dict) -> None:
-        self.pending_offers.append((day, offer))
+    def create_genesis_block(self):
+        return Block(0, time.time(), "Genesis Block", "0")
 
-    def finalize_day(self, day: int) -> None:
-        for offer_day, offer in self.pending_offers:
-            if offer_day not in self.offers:
-                self.offers[offer_day] = []
-            self.offers[offer_day].append(offer)
-        self.pending_offers = []
-        self.chain.append(f"Day {day} finalized")
+    def get_latest_block(self):
+        return self.chain[-1]
 
-    def get_offers(self, day: int, days_ahead: int):
-        relevant_offers = []
-        for d in range(day, day + days_ahead):
-            if d in self.offers:
-                for i, offer in enumerate(self.offers[d]):
-                    if d not in self.used_offers or i not in self.used_offers[d]:
-                        relevant_offers.append((i, offer))
-        return relevant_offers
-
-    def reserve_offer(self, day: int, household_id: int, offer_id: int) -> None:
-        if day not in self.reservations:
-            self.reservations[day] = {}
-        self.reservations[day][household_id] = offer_id
-
-    def mark_offer_as_used(self, day: int, offer_id: int) -> None:
-        if day not in self.used_offers:
-            self.used_offers[day] = []
-        self.used_offers[day].append(offer_id)
-
-    def get_reservations(self, day: int):
-        return self.reservations.get(day, {})
+    def add_block(self, data):
+        previous_block = self.get_latest_block()
+        new_block = Block(len(self.chain), time.time(), data, previous_block.hash)
+        self.chain.append(new_block)
