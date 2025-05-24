@@ -1,3 +1,4 @@
+from typing import Literal
 from simulation.battery.central_battery import CentralBattery
 from simulation.household import Household
 
@@ -5,7 +6,7 @@ class SimpleRuleBasedOptimizer:
     def __init__(self, central_battery: CentralBattery):
         self.central_battery = central_battery
 
-    def optimize(self, households: list[Household], forecasts: dict[int, list[dict]]) -> list[dict]:
+    def optimize(self, households: list[Household], forecasts: dict[str, dict[Literal["production", "consumption"], list[float]]]) -> list[dict]:
         offers = []
 
         # Csoportosítjuk a háztartásokat id alapján
@@ -19,8 +20,10 @@ class SimpleRuleBasedOptimizer:
 
             # 1. lépés: kiszámítjuk az egyenleget minden háztartásra
             for hh_id, hh in hh_map.items():
-                day_data = forecasts[hh_id][day]
-                net = day_data['production'] - day_data['consumption']
+                production: float = forecasts[hh_id]["production"][day]
+                consumption: float = forecasts[hh_id]["consumption"][day]
+
+                net = production - consumption
                 daily_balances[hh_id] = net
 
                 if net > 0:

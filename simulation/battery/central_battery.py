@@ -1,28 +1,47 @@
 class CentralBattery:
-    def __init__(self, capacity: float, efficiency: float, tax_per_kwh: float):
-        self.capacity = capacity
-        self.efficiency = efficiency
-        self.level = 0.0
-        self.tax_per_kwh = tax_per_kwh
+    def __init__(self, capacity_in_kwh: float, efficiency: float, tax_per_kwh: float):
+        self.capacity_in_kwh: float = capacity_in_kwh
+        self.efficiency: float = efficiency
+        self.tax_per_kwh: float = tax_per_kwh
 
-    def store_energy(self, amount: float):
-        taxed = max(0, amount - self.tax_per_kwh)
-        actual = min(taxed * self.efficiency, self.capacity - self.level)
-        self.level += actual
-        return actual
+        # For every households stores the stored kwh for tax calculation
+        self.households_shared_battery: dict[str, float] = {}
 
-    def retrieve_energy(self, amount: float) -> float:
-        available = min(amount, self.level)
-        self.level -= available
-        return available * self.efficiency
+    def retrieve_energy(self, household_id: str, amount: float) -> float:
+        if self.households_shared_battery.get(household_id) is None:
+            return 0
+        elif self.households_shared_battery[household_id] >= amount:
+            self.households_shared_battery[household_id] -= amount
+            return amount
+        else:
+            return_kwh = self.households_shared_battery[household_id]
+            self.households_shared_battery[household_id] = 0
+            return return_kwh
 
-    def degrade(self):
-        self.level *= 0.998  # slower loss than home batteries
+    def store_energy_for_house(self, household_id: str, amount: float) -> None:
+        if self.households_shared_battery.get(household_id) is None:
+            self.households_shared_battery[household_id] = 0
+        self.households_shared_battery[household_id] += amount
 
-    def status(self):
-        return {
-            "capacity": self.capacity,
-            "efficiency": self.efficiency,
-            "level": round(self.level, 2),
-            "tax_per_kwh": self.tax_per_kwh
-        }
+    def update(self, household_id: str):
+        if self.households_shared_battery.get(household_id) is None:
+            return
+
+        self.households_shared_battery[household_id] *= self.efficiency
+        amount = self.households_shared_battery[household_id]
+        tax = amount*self.tax_per_kwh
+        if amount > 0:
+            self.households_shared_battery[household_id] -= tax
+
+    def get_stored_kwh(self, household_id: str) -> float:
+        return self.households_shared_battery[household_id]
+
+    def get_efficiency(self) -> float:
+        return self.efficiency
+
+    def get_capacity_in_kwh(self) -> float:
+        return self.capacity_in_kwh
+
+    def get_tax_per_kwh(self, household_id: str) -> float:
+        return self.tax_per_kwh * self.households_shared_battery[household_id]
+
