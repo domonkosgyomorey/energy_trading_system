@@ -74,24 +74,18 @@ class Blockchain:
         return [household.to_dict() for _, household in self.households.items()]
 
 
-    def update_households(self) -> None:
-        # Itt majd implementáld az update logikát
-        pass
-
     def add_offer(self, offers: list[dict]) -> None:
         self.offers = [[] for _ in range(self.forecast_prediction_size)]
         for offer in offers:
             self.offers[offer["iter_index"]].append(Offer(buyer_id=offer["buyer_id"], seller_id=offer["seller_id"], amount=offer["amount"]))
 
     def trade_on_every_15(self) -> None:
-        # A blokk adat egy string, az első pending_offers lista összes ajánlatának string összefűzve, soronként:
-        data = "\n".join([offer.to_string() for offer in self.pending_offers[0]])
-        self.add_block(data)
-
-        # Shifteljük a pending_offers listát eggyel előrébb
-        for i in range(len(self.pending_offers) - 1):
-            self.pending_offers[i] = self.pending_offers[i + 1]
-        self.pending_offers.pop()
-
+        trading_str: str = ""
+        for offer in self.offers[0]:
+            self.households[offer.seller_address].token -= offer.amount
+            self.households[offer.buyer_address].token += offer.amount
+            trading_str += f"{offer.seller_address}->{offer.buyer_address}:{offer.amount};"
+        
+        self.add_block(trading_str)
 
     
