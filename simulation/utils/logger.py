@@ -1,5 +1,4 @@
 import logging
-from datetime import datetime
 
 logger = logging.getLogger("EnergyTradingLogger")
 logger.setLevel(logging.DEBUG)

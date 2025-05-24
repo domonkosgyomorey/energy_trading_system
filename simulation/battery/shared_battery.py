@@ -8,7 +8,7 @@ class SharedBattery(Battery):
         self.central_battery: CentralBattery = central_battery
 
     def store_energy(self, amount: float) -> None:
-        self.central_battery.store_energy_for_house(household_id=self.household_id, amount=amount)
+        self.central_battery.store_energy(household_id=self.household_id, amount=amount)
 
     def retrieve_energy(self, amount: float) -> float:
         return self.central_battery.retrieve_energy(household_id=self.household_id, amount=amount)

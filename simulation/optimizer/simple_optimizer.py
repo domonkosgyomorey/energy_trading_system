@@ -4,8 +4,7 @@ from simulation.household import Household
 
 class SimpleRuleBasedOptimizer:
     def __init__(self, central_battery: CentralBattery):
-        self.central_battery = central_battery
-
+        pass
     def optimize(self, households: list[Household], forecasts: dict[str, dict[Literal["production", "consumption"], list[float]]]) -> list[dict]:
         offers = []
 

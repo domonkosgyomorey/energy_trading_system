@@ -7,12 +7,14 @@ from simulation.battery.simple_battery import SimpleBattery
 from simulation.battery.central_battery import CentralBattery
 from simulation.battery.shared_battery import SharedBattery 
 from simulation.household_resource_handler.simple_resource_handler import SimpleResourceHandler
+from simulation.config import Config
 
+import json
 import pandas as pd
 from typing import Literal
 
 class Simulation:
-    def __init__(self, household_data: pd.DataFrame, household_without_battery_prob: float, forecaster_pred_range: int):
+    def __init__(self, household_data: pd.DataFrame):
         """
         Description: Simulates the automatic energy trading with blockchain.
 
@@ -21,14 +23,13 @@ class Simulation:
             household_without_battery_prob (float): From this, the simulation calculates how many household will have battery
             forecaster_pred_range (int): The forecaster will predict prod and cons this much further
         """
-        self.forecaster_pred_range: int = forecaster_pred_range
 
         self.central_battery: CentralBattery = CentralBattery(capacity_in_kwh=10000000.0, efficiency=0.999, tax_per_kwh=0.01)
         self.households: list[Household] = []
          
         grouped = household_data.groupby("id")
         iteration_counter: int = 0
-        no_battery_iter: int = int(grouped.count() * household_without_battery_prob)
+        no_battery_iter: int = int(grouped.count() * Config.HOUSEHOLD_WITHOUT_BATTERY_PROB)
 
         for household_id, group in grouped:
             group = group.drop(columns="id")
@@ -46,45 +47,20 @@ class Simulation:
 
     def run(self, steps):
         for step in range(steps):
-            print(f"\n--- Step {step+1} ---")
             forecasts: dict[str, dict[Literal["production", "consumption"], list[float]]] = {}
             for hh in self.households:
                 hh.update(iteration=step, updated_token=hh.battery.get_stored_kwh())
                 current_info: dict[Literal["production", "consumption", "stored_kwh"], float] = hh.get_current_data(iteration=step)
-                self.blockchain.add_block({"type": "daily_data", "data": current_info})
                 print(f"Household({hh.id}): production:{current_info["production"]}, consumption:{current_info["consumption"]}, battery:{current_info["stored_kwh"]}KWh")
-                forecasts[hh.id] = self.forecaster.forecast(household=hh, iteration=step, prediction_range=self.forecaster_pred_range) 
-            
-            self.blockchain.add_block({"type": "forecast_data", "data": forecasts})
+                forecasts[hh.id] = self.forecaster.forecast(household=hh, iteration=step) 
+                self.blockchain.add_household_data(id=hh.id, production=current_info["production"], consumption=current_info["consumption"], stored_kwh=current_info["stored_kwh"])
+            self.blockchain.add_block(f"['type': 'forecast_data', 'data': {json.dumps(forecasts)}]")
 
             trade_plan = self.optimizer.optimize(self.households, forecasts)
-            offers = [trade for trade in trade_plan if trade['type'] == 'offer']
-            requests = [trade for trade in trade_plan if trade['type'] == 'request']
+            finalized_offers = self.finalize_offers(trade_plan)
 
-            matched = []
-            for req in requests:
-                for offer in offers:
-                    if offer['day'] == req['day'] and offer['amount'] > 0:
-                        offered_hh = self.households[offer['household_id']]
-                        requested_hh = self.households[req['household_id']]
-                        transfer = min(req['amount'], offer['amount'])
-                        actual_transfer = offered_hh.provide_energy(transfer)
-                        requested_hh.receive_energy(actual_transfer)
-                        offer['amount'] -= transfer
-                        req['amount'] -= transfer
-                        matched.append({
-                            "from": offer['household_id'],
-                            "to": req['household_id'],
-                            "day": offer['day'],
-                            "amount": round(actual_transfer, 2)
-                        })
-                        if req['amount'] <= 0:
-                            break
+            self.blockchain.add_offer(offers=finalized_offers)
+            self.blockchain.trade_event()
 
-            self.blockchain.add_block({"type": "offers", "data": offers})
-            self.blockchain.add_block({"type": "requests", "data": requests})
-            self.blockchain.add_block({"type": "trades", "data": matched})
-
-            print("Trades:")
-            for trade in matched:
-                print(trade)
+    def finalize_offers(self, optimized_offers: list[dict]) -> dict[str, list[dict]]:
+       return optimized_offers 

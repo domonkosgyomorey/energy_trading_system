@@ -18,7 +18,7 @@ class CentralBattery:
             self.households_shared_battery[household_id] = 0
             return return_kwh
 
-    def store_energy_for_house(self, household_id: str, amount: float) -> None:
+    def store_energy(self, household_id: str, amount: float) -> None:
         if self.households_shared_battery.get(household_id) is None:
             self.households_shared_battery[household_id] = 0
         self.households_shared_battery[household_id] += amount

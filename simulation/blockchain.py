@@ -1,26 +1,24 @@
 import hashlib
 from collections import deque
 import time
-from typing import Literal
+
+from simulation.config import Config
+
 class Offer:
     def __init__(self, seller_id: str, buyer_id: str, amount: float):
         self.seller_address = seller_id
         self.buyer_address = buyer_id
         self.amount = amount
 
-    def to_string(self) -> str:
-        return f"{self.seller_address};{self.buyer_address};{self.amount};"
-
-    @staticmethod
-    def from_dict(data: dict[Literal["seller_id", "buyer_id", "amount", "iter_index"], str | float | int]) -> None:
-       Offer(seller_id=str(data["seller_id"]), buyer_id=str(data["buyer_id"]), amount=float(data["amount"])) 
-    
 class HouseholdData:
-    def __init__(self,  id: str, forecast_history_size):
+    def __init__(self,  id: str):
         self.id:str = id
-        self.production: deque[float] = deque(maxlen=forecast_history_size) 
-        self.consumption: deque[float] = deque(maxlen=forecast_history_size)
+        self.production: deque[float] = deque(maxlen=Config.FORECASTER_HIST_SIZE) 
+        self.consumption: deque[float] = deque(maxlen=Config.FORECASTER_HIST_SIZE)
         self.token: float = 0
+
+    def __str__(self) -> str:
+        return f"{{id:{self.id},production:{self.production[-1]},consumption:{self.consumption[-1]},token:{self.token}}}"
 
     def to_dict(self) -> dict:
         return {
@@ -43,14 +41,11 @@ class Block:
         return hashlib.sha256(block_string.encode()).hexdigest()
 
 class Blockchain:
-    def __init__(self, forecast_history_size: int, forecast_prediction_size: int):
+    def __init__(self):
         self.chain: list[Block] = [self.create_genesis_block()]
         self.households: dict[str, HouseholdData] = {}
-        self.offers: list[list[Offer]] = []
+        self.offers: list[Offer] = []
         
-        self.forecast_history_size = forecast_history_size
-        self.forecast_prediction_size = forecast_prediction_size
-
     def create_genesis_block(self) -> Block:
         return Block(0, time.time(), "Genesis Block", "0")
 
@@ -64,24 +59,25 @@ class Blockchain:
 
     def add_household_data(self, id: str, production: float, consumption: float, stored_kwh: float) -> None:
         if self.households.get(id) is None:
-            self.households[id] = HouseholdData(id=id,forecast_history_size=self.forecast_prediction_size)
+            self.households[id] = HouseholdData(id=id)
         
         self.households[id].production.append(production)
         self.households[id].consumption.append(consumption)
         self.households[id].token = stored_kwh
+        self.add_block(self.households[id].__str__())
 
     def get_households_data(self) -> list[dict]:
         return [household.to_dict() for _, household in self.households.items()]
 
 
     def add_offer(self, offers: list[dict]) -> None:
-        self.offers = [[] for _ in range(self.forecast_prediction_size)]
+        self.offers: list[Offer] = []
         for offer in offers:
-            self.offers[offer["iter_index"]].append(Offer(buyer_id=offer["buyer_id"], seller_id=offer["seller_id"], amount=offer["amount"]))
+            self.offers.append(Offer(buyer_id=offer["buyer_id"], seller_id=offer["seller_id"], amount=offer["amount"]))
 
-    def trade_on_every_15(self) -> None:
+    def trade_event(self) -> None:
         trading_str: str = ""
-        for offer in self.offers[0]:
+        for offer in self.offers:
             self.households[offer.seller_address].token -= offer.amount
             self.households[offer.buyer_address].token += offer.amount
             trading_str += f"{offer.seller_address}->{offer.buyer_address}:{offer.amount};"
