@@ -1,11 +1,9 @@
-from typing import Literal
-from simulation.household import Household
-
 import numpy as np
 import cvxpy as cp
-
 from simulation.config import Config
 from simulation.optimizer.optimizer import OptimizerStrategy
+from simulation.household import Household
+from typing import Literal
 
 class SimpleRuleBasedOptimizer(OptimizerStrategy):
     
@@ -13,60 +11,63 @@ class SimpleRuleBasedOptimizer(OptimizerStrategy):
         N = len(households)
         T = Config.FORECASTER_PRED_SIZE
         
-        E = cp.Variable((N, N, T), nonneg=True)  # E[i,j,t] = i → j energia
-        G = cp.Variable((N, T), nonneg=True)     # Városi áram
-        
+        # Változók definiálása
+        G = cp.Variable((N, T), nonneg=True)  # Gridből vett energia
+        B = cp.Variable((N, T+1), nonneg=True)  # Akkumulátor állapot
         charge = cp.Variable((N, T), nonneg=True)
         discharge = cp.Variable((N, T), nonneg=True)
+        P2P_in = cp.Variable((N, T), nonneg=True)  # P2P-ből vett energia
+        P2P_out = cp.Variable((N, T), nonneg=True)  # P2P-be adott energia
         
-        B = cp.Variable((N, T+1), nonneg=True)   # Akkumulátor szintek
-
-        # Célfüggvény
-        objective = cp.sum(cp.multiply(G, np.array(city_grid_prices_forecast)))
+        # Célfüggvény: Minimális grid költség
+        objective = cp.sum(cp.multiply(G, city_grid_prices_forecast))
         
-        # Korlátozások
         constraints = []
         
-        # Kezdeti akkumulátor
+        # Kezdeti akkumulátor feltöltés
         for i in range(N):
             constraints += [B[i,0] == households[i].battery.get_stored_kwh()]
         
+        # Pool egyensúly: Összes P2P_in = Összes P2P_out
+        for t in range(T):
+            constraints += [cp.sum(P2P_in[:,t]) == cp.sum(P2P_out[:,t])]
+        
         for t in range(T):
             for i in range(N):
-                # Energiamérleg
-                charge_efficiency: float = households[i].battery.get_fields().get("charge_efficiency") or 1.0
-                discharge_efficiency: float = households[i].battery.get_fields().get("discharge_efficiency") or 1.0
-                energy_in = forecasts[households[i].id]["production"][t] + cp.sum(E[:,i,t]) + discharge[i,t]*discharge_efficiency
-                energy_out = forecasts[households[i].id]["consumption"][t] + cp.sum(E[i,:,t]) + G[i,t] + charge[i,t]/charge_efficiency
-                constraints += [energy_in == energy_out]
+                prod = forecasts[households[i].id]["production"][t]
+                cons = forecasts[households[i].id]["consumption"][t]
+                capacity = households[i].battery.get_fields().get("capacity_in_kwh", 0)
                 
-                # Akkumulátor dinamika
-                constraints += [B[i,t+1] == B[i,t] - discharge[i,t] + charge[i,t]]
-                capacity_in_kwh: float = households[i].battery.get_fields().get("capacity_in_kwh") or 0
-                constraints += [B[i,t+1] <= capacity_in_kwh]
-                constraints += [B[i,t+1] >= 0]
-                
-                # Töltés/kisütés korlátok
-                constraints += [charge[i,t] <= capacity_in_kwh - B[i,t]]
-                constraints += [discharge[i,t] <= B[i,t]]
-
-        # Optimalizáció
-        prob = cp.Problem(cp.Minimize(objective), constraints)
-        prob.solve(solver=cp.ECOS)
+                # Energiamérleg újratervézve P2P-vel
+                constraints += [
+                    G[i,t] + discharge[i,t] + P2P_in[i,t] == cons - prod + charge[i,t] + P2P_out[i,t],
+                    B[i,t+1] == B[i,t] + charge[i,t] - discharge[i,t],
+                    B[i,t+1] <= capacity,
+                    charge[i,t] <= capacity - B[i,t],
+                    discharge[i,t] <= B[i,t]
+                ]
         
-        # Eredmények formázása
+        # Optimalizáció végrehajtása
+        prob = cp.Problem(cp.Minimize(objective), constraints)
+        prob.solve(solver=cp.ECOS, verbose=False)
+        
+        # Eredmények formázása P2P kereskedelem részletezésével
         output = []
         for i in range(N):
+            p2p_transactions = []
+            for j in range(N):
+                if i != j:
+                    total_energy = sum(P2P_out[j,t].value * (P2P_in[i,t].value/(cp.sum(P2P_in[:,t]).value + 1e-6)) 
+                                     for t in range(T) if cp.sum(P2P_in[:,t]).value > 1e-6)
+                    if total_energy > 1e-4:
+                        p2p_transactions.append({"from": households[j].id, "amount": total_energy})
+            
             output.append({
-                "id": i,
-                "sells": sum(E[i,:,:].value.flatten()),
-                "buys": [
-                    {"from": j, "amount": E[j,i,t].value}
-                    for j in range(N) for t in range(T) if E[j,i,t].value > 1e-4
-                ],
-                "buy_from_city": G[i,:].value.sum(),
-                "used_accumulator": discharge[i,:].value.sum() * (households[i].battery.get_fields().get("discharge_efficiency") or 1.0),
+                "id": households[i].id,
+                "sells": np.sum(P2P_out[i,:].value),
+                "buys": p2p_transactions,
+                "buy_from_city": np.sum(G[i,:].value),
+                "used_accumulator": np.sum(discharge[i,:].value),
                 "remaining_accumulator": B[i,-1].value
             })
-        
         return output

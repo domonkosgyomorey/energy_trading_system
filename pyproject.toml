@@ -10,5 +10,5 @@ dependencies = [
     "pandas==2.2.3",
     "pandas-stubs==2.2.3.250308",
     "pyarrow==19.0.1",
-    "cvxpy"
+    "cvxpy[ECOS]"
 ]

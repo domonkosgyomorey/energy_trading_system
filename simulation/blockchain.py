@@ -5,10 +5,13 @@ import time
 from simulation.config import Config
 
 class Offer:
-    def __init__(self, seller_id: str, buyer_id: str, amount: float):
+    def __init__(self, seller_id: str, buyer_id: str, amount: float, amount_from_city: float, amount_from_battery: float, remaining_battery):
         self.seller_address = seller_id
         self.buyer_address = buyer_id
         self.amount = amount
+        self.amount_from_city = amount_from_city
+        self.amount_from_battery = amount_from_battery
+        self.remaining_battery = remaining_battery
 
 class HouseholdData:
     def __init__(self,  id: str):
@@ -74,15 +77,19 @@ class Blockchain:
         self.offers: list[Offer] = []
         for _, offers in finalized_offers.items():
             for offer in offers:
-                self.offers.append(Offer(buyer_id=offer["buyer"], seller_id=offer["seller"], amount=offer["amount"]))
+                self.offers.append(Offer(buyer_id=offer["buyer"], seller_id=offer["seller"], amount=offer["amount"], amount_from_city=offer["amount_from_city"], amount_from_battery=offer["amount_from_battery"], remaining_battery=offer["remaining_battery"]))
 
     def trade_event(self) -> None:
         trading_str: str = ""
         for offer in self.offers:
             self.households[offer.seller_address].token -= offer.amount
             self.households[offer.buyer_address].token += offer.amount
-            trading_str += f"{offer.seller_address}->{offer.buyer_address}:{offer.amount};"
-        
+            self.households[offer.seller_address].token += offer.amount_from_city
+            self.households[offer.seller_address].token -= offer.amount_from_battery
+            self.households[offer.seller_address].token += offer.remaining_battery
+            trading_str += f"{offer.seller_address}->{offer.buyer_address}:{offer.amount},from_city:{offer.amount_from_city},from_battery:{offer.amount_from_battery},remaining_battery:{offer.remaining_battery};"
+            
+
         self.add_block(trading_str)
 
     
