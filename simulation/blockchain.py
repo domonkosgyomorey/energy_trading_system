@@ -70,10 +70,11 @@ class Blockchain:
         return [household.to_dict() for _, household in self.households.items()]
 
 
-    def add_offer(self, offers: list[dict]) -> None:
+    def add_offer(self, finalized_offers: dict[str, list[dict]]) -> None:
         self.offers: list[Offer] = []
-        for offer in offers:
-            self.offers.append(Offer(buyer_id=offer["buyer_id"], seller_id=offer["seller_id"], amount=offer["amount"]))
+        for _, offers in finalized_offers.items():
+            for offer in offers:
+                self.offers.append(Offer(buyer_id=offer["buyer"], seller_id=offer["seller"], amount=offer["amount"]))
 
     def trade_event(self) -> None:
         trading_str: str = ""

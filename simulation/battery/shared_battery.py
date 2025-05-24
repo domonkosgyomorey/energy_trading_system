@@ -13,15 +13,17 @@ class SharedBattery(Battery):
     def retrieve_energy(self, amount: float) -> float:
         return self.central_battery.retrieve_energy(household_id=self.household_id, amount=amount)
 
-    def update(self) -> None:
-        self.central_battery.update(household_id=self.household_id)
-
     def get_stored_kwh(self) -> float:
         return self.central_battery.get_stored_kwh(household_id=self.household_id)
 
     def get_capacity_in_kwh(self) -> float:
         return self.central_battery.get_capacity_in_kwh()
 
-    def get_efficiency(self) -> float:
-        return self.central_battery.get_efficiency()
+    def get_fields(self) -> dict:
+        return {
+            "discharge_efficiency": self.central_battery.discharge_efficiency,
+            "charge_efficiency": self.central_battery.charge_efficiency,
+            "capacity_in_kwh": self.central_battery.capacity_in_kwh,
+            "stored_kwh": self.get_stored_kwh()
+        }
 

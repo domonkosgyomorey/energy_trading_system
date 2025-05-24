@@ -1,15 +1,18 @@
 from simulation.battery.battery import Battery
 
 class SimpleBattery(Battery):
-    def __init__(self, capacity_in_kwh: float, efficiency: float):
+    def __init__(self, capacity_in_kwh: float, charge_efficiency: float, discharge_efficiency: float):
         self.capacity_in_kwh: float = capacity_in_kwh
-        self.efficiency: float = efficiency
+        self.charge_efficiency: float = charge_efficiency
+        self.discharge_efficiency: float = discharge_efficiency
         self.stored_kwh: float = 0.0
 
     def store_energy(self, amount: float) -> None:
+        amount *= self.charge_efficiency
         self.store_kwh = min(self.capacity_in_kwh, self.stored_kwh+amount)
 
     def retrieve_energy(self, amount: float) -> float:
+        amount += (1-self.discharge_efficiency)*amount
         if self.stored_kwh > amount:
             self.stored_kwh -= amount
             return amount
@@ -18,14 +21,16 @@ class SimpleBattery(Battery):
             self.stored_kwh = 0
             return return_kwh
 
-    def update(self):
-        self.stored_kwh *= self.efficiency
-
     def get_stored_kwh(self) -> float:
-        return self.stored_kwh
+        return self.stored_kwh*self.discharge_efficiency
 
     def get_capacity_in_kwh(self) -> float:
         return self.capacity_in_kwh
 
-    def get_efficiency(self) -> float:
-        return self.efficiency
+    def get_fields(self) -> dict:
+        return {
+            "discharge_efficiency": self.discharge_efficiency,
+            "charge_efficiency": self.charge_efficiency,
+            "capacity_in_kwh": self.capacity_in_kwh,
+            "stored_kwh": self.stored_kwh
+        }

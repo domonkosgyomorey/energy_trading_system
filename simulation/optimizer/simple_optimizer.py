@@ -1,117 +1,72 @@
 from typing import Literal
-from simulation.battery.central_battery import CentralBattery
 from simulation.household import Household
 
-class SimpleRuleBasedOptimizer:
-    def __init__(self, central_battery: CentralBattery):
-        pass
-    def optimize(self, households: list[Household], forecasts: dict[str, dict[Literal["production", "consumption"], list[float]]]) -> list[dict]:
-        offers = []
+import numpy as np
+import cvxpy as cp
 
-        # Csoportosítjuk a háztartásokat id alapján
-        hh_map = {hh.id: hh for hh in households}
-        days = len(next(iter(forecasts.values())))  # feltételezzük minden háztartásra ugyanannyi nap van
+from simulation.config import Config
+from simulation.optimizer.optimizer import OptimizerStrategy
 
-        for day in range(days):
-            daily_balances = {}
-            surplus_hhs = []
-            deficit_hhs = []
+class SimpleRuleBasedOptimizer(OptimizerStrategy):
+    
+    def optimize(self, households: list[Household], forecasts: dict[str, dict[Literal["production", "consumption"], list[float]]], city_grid_prices_forecast: list[float]) -> list[dict]:
+        N = len(households)
+        T = Config.FORECASTER_PRED_SIZE
+        
+        E = cp.Variable((N, N, T), nonneg=True)  # E[i,j,t] = i → j energia
+        G = cp.Variable((N, T), nonneg=True)     # Városi áram
+        
+        charge = cp.Variable((N, T), nonneg=True)
+        discharge = cp.Variable((N, T), nonneg=True)
+        
+        B = cp.Variable((N, T+1), nonneg=True)   # Akkumulátor szintek
 
-            # 1. lépés: kiszámítjuk az egyenleget minden háztartásra
-            for hh_id, hh in hh_map.items():
-                production: float = forecasts[hh_id]["production"][day]
-                consumption: float = forecasts[hh_id]["consumption"][day]
+        # Célfüggvény
+        objective = cp.sum(cp.multiply(G, np.array(city_grid_prices_forecast)))
+        
+        # Korlátozások
+        constraints = []
+        
+        # Kezdeti akkumulátor
+        for i in range(N):
+            constraints += [B[i,0] == households[i].battery.get_stored_kwh()]
+        
+        for t in range(T):
+            for i in range(N):
+                # Energiamérleg
+                charge_efficiency: float = households[i].battery.get_fields().get("charge_efficiency") or 1.0
+                discharge_efficiency: float = households[i].battery.get_fields().get("discharge_efficiency") or 1.0
+                energy_in = forecasts[households[i].id]["production"][t] + cp.sum(E[:,i,t]) + discharge[i,t]*discharge_efficiency
+                energy_out = forecasts[households[i].id]["consumption"][t] + cp.sum(E[i,:,t]) + G[i,t] + charge[i,t]/charge_efficiency
+                constraints += [energy_in == energy_out]
+                
+                # Akkumulátor dinamika
+                constraints += [B[i,t+1] == B[i,t] - discharge[i,t] + charge[i,t]]
+                capacity_in_kwh: float = households[i].battery.get_fields().get("capacity_in_kwh") or 0
+                constraints += [B[i,t+1] <= capacity_in_kwh]
+                constraints += [B[i,t+1] >= 0]
+                
+                # Töltés/kisütés korlátok
+                constraints += [charge[i,t] <= capacity_in_kwh - B[i,t]]
+                constraints += [discharge[i,t] <= B[i,t]]
 
-                net = production - consumption
-                daily_balances[hh_id] = net
-
-                if net > 0:
-                    surplus_hhs.append((hh_id, net))
-                elif net < 0:
-                    deficit_hhs.append((hh_id, -net))
-
-            # 2. lépés: fedezzük a hiányokat a feleslegekből
-            for def_id, need in deficit_hhs:
-                for i, (sur_id, available) in enumerate(surplus_hhs):
-                    if available <= 0:
-                        continue
-                    used = min(available, need)
-                    offers.append({
-                        "type": "transfer",
-                        "from": sur_id,
-                        "to": def_id,
-                        "day": day,
-                        "amount": round(used, 2)
-                    })
-                    surplus_hhs[i] = (sur_id, available - used)
-                    need -= used
-                    if need <= 0:
-                        break
-                if need > 0:
-                    hh = hh_map[def_id]
-                    # 3. lépés: próbáljuk akkumulátorból fedezni
-                    if hh.battery and hh.battery.level >= need:
-                        offers.append({
-                            "type": "battery_discharge",
-                            "household_id": def_id,
-                            "day": day,
-                            "amount": round(need, 2)
-                        })
-                        hh.battery.level -= need
-                        need = 0
-                    elif self.central_battery and self.central_battery.level >= need:
-                        offers.append({
-                            "type": "central_discharge",
-                            "household_id": def_id,
-                            "day": day,
-                            "amount": round(need, 2)
-                        })
-                        self.central_battery.level -= need
-                        need = 0
-
-                    if need > 0:
-                        # 4. lépés: városból kell kérni
-                        offers.append({
-                            "type": "request",
-                            "household_id": def_id,
-                            "day": day,
-                            "amount": round(need, 2)
-                        })
-
-            # 5. lépés: a megmaradt felesleget eltároljuk (ha lehet)
-            for hh_id, remain in surplus_hhs:
-                if remain <= 0:
-                    continue
-                hh = hh_map[hh_id]
-                if hh.battery and hh.battery.capacity - hh.battery.level > 0:
-                    store_amount = min(remain, hh.battery.capacity - hh.battery.level)
-                    offers.append({
-                        "type": "battery_charge",
-                        "household_id": hh_id,
-                        "day": day,
-                        "amount": round(store_amount, 2)
-                    })
-                    hh.battery.level += store_amount
-                    remain -= store_amount
-                if remain > 0 and self.central_battery:
-                    central_free = self.central_battery.capacity - self.central_battery.level
-                    store_amount = min(remain, central_free)
-                    if store_amount > 0:
-                        offers.append({
-                            "type": "central_charge",
-                            "household_id": hh_id,
-                            "day": day,
-                            "amount": round(store_amount, 2)
-                        })
-                        self.central_battery.level += store_amount
-                        remain -= store_amount
-                if remain > 0:
-                    # még mindig maradt felesleg: küldjük ki
-                    offers.append({
-                        "type": "offer",
-                        "household_id": hh_id,
-                        "day": day,
-                        "amount": round(remain, 2)
-                    })
-
-        return offers
+        # Optimalizáció
+        prob = cp.Problem(cp.Minimize(objective), constraints)
+        prob.solve(solver=cp.ECOS)
+        
+        # Eredmények formázása
+        output = []
+        for i in range(N):
+            output.append({
+                "id": i,
+                "sells": sum(E[i,:,:].value.flatten()),
+                "buys": [
+                    {"from": j, "amount": E[j,i,t].value}
+                    for j in range(N) for t in range(T) if E[j,i,t].value > 1e-4
+                ],
+                "buy_from_city": G[i,:].value.sum(),
+                "used_accumulator": discharge[i,:].value.sum() * (households[i].battery.get_fields().get("discharge_efficiency") or 1.0),
+                "remaining_accumulator": B[i,-1].value
+            })
+        
+        return output
