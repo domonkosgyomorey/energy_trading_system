@@ -20,14 +20,14 @@ class HouseholdData:
         self.id:str = id
         self.production = production
         self.consumption = consumption
-        self.battery: float = battery
+        self.stored_kwh: float = battery
 
     def to_dict(self) -> dict:
         return {
             "id": self.id,
             "production": self.production,
             "consumption": self.consumption,
-            "battery": self.battery
+            "stored_kwh": self.stored_kwh
         }
 
 class Block:
@@ -62,7 +62,8 @@ class Blockchain:
         new_block = Block(len(self.chain), time.time(), data, previous_block.hash)
         self.chain.append(new_block)
 
-    def add_household_data(self, id: str, production: Queue, consumption: Queue, battery) -> None:
+    def upsert_household_data(self, id: str, production: float, consumption: float, battery) -> None:
+
         self.household_data_list.append(HouseholdData(id, production, consumption, battery))
 
     def get_households_data(self) -> list[dict]:
