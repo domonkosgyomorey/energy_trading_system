@@ -1,4 +1,3 @@
-import random
 from simulation.battery.battery import Battery
 from typing import Literal
 

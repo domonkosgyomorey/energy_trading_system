@@ -33,7 +33,7 @@ class CentralBattery:
                 self.households_shared_battery[household_id] -= tax
 
     def get_stored_kwh(self, household_id: str) -> float:
-        return self.households_shared_battery[household_id]
+        return self.households_shared_battery.get(household_id, 0.0)
 
     def get_capacity_in_kwh(self) -> float:
         return self.capacity_in_kwh
