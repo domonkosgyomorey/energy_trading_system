@@ -7,7 +7,8 @@ class Household:
         self.data: dict = data
         self.battery: Battery = battery
 
-    def get_current_data(self, iteration: int) -> dict[Literal["production", "consumption", "stored_kwh"], float]:
+    def update_battery_with_production_and_get_sensor_data(self, iteration: int) -> dict[Literal["production", "consumption", "stored_kwh"], float]:
+        self.battery.store_energy(amount=self.data["production"][iteration])
         return {
             "production": self.data["production"][iteration],
             "consumption": self.data["consumption"][iteration],
