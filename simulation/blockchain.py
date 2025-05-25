@@ -82,6 +82,7 @@ class Blockchain:
     def trade_event(self) -> None:
         trading_str: str = ""
         for offer in self.offers:
+            self.households[offer.seller_address].token = 0
             self.households[offer.seller_address].token -= offer.amount
             self.households[offer.buyer_address].token += offer.amount
             self.households[offer.seller_address].token += offer.amount_from_city

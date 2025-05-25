@@ -39,12 +39,15 @@ class Simulation:
 
         limit = 5
         for household_id, group in grouped:
-            group = group.drop(columns=["id", "timestamp"])
+            group = group.drop(columns=["id", "timestamp", "category", "season", "period"])
             raw_dict = {col: group[col].to_list() for col in group.columns}
             data_dict = defaultdict(list)
             for key, val in raw_dict.items():
-                for i in range(0, len(val), 96*7):
-                    data_dict[key].append(val[i]+val[i+1]+val[i+2]+val[i+3])                
+                for i in range(0, len(val)-96*7, 96*7):
+                    sum = 0
+                    for j in range(96*7):
+                        sum += abs(val[i+j])
+                    data_dict[key].append(sum)                
 
             if iteration_counter % no_battery_iter == 0:
                 self.households.append(Household(id=str(household_id), data=data_dict, battery=SharedBattery(central_battery=self.central_battery,household_id=str(household_id))))
@@ -68,7 +71,6 @@ class Simulation:
             households_forecasts: dict[str, dict[Literal["production", "consumption"], list[float]]] = {}
             for hh in self.households:
                 current_info: dict[Literal["production", "consumption", "stored_kwh"], float] = hh.get_current_data(iteration=step)
-                logger.info(f"Household({hh.id}): production:{current_info["production"]}, consumption:{current_info["consumption"]}, battery:{current_info["stored_kwh"]}KWh")
                 df_logger_helper.append({
                     "iteration": step,
                     "id": hh.id,
@@ -76,6 +78,8 @@ class Simulation:
                     "consumption": current_info["consumption"],
                     "stored_kwh": current_info["stored_kwh"]
                 })
+
+                logger.info("id: "+str(hh.id)+";"+str(current_info))
                 self.blockchain.add_household_data(id=hh.id, production=current_info["production"], consumption=current_info["consumption"], stored_kwh=current_info["stored_kwh"])
  
                 households_forecasts[hh.id] = self.forecaster.forecast(household=hh, iteration=step, forecast_size=Config.FORECASTER_PRED_SIZE) 
@@ -86,18 +90,23 @@ class Simulation:
 
             trade_plan = self.optimizer.optimize(self.households, households_forecasts, city_grid_price_forcast)
             logger.info(trade_plan)
+
             finalized_offers = self.finalize_offers(trade_plan)
             for logged_hhd in df_logger_helper:
                 trade_to:list[str] = []
                 for offer in finalized_offers[logged_hhd["id"]]:
                     trade_to.append(f"{offer['buyer']}:{offer['amount']}")
-                    #logger.info(f"{offer['seller']}->{offer['buyer']}:{offer['amount']},from_city:{offer['amount_from_city']},from_battery:{'amount_from_battery'},remaining_battery:{'remaining_battery'}")
+                    logger.info(f"{logged_hhd['id']}->{offer['buyer']}:{offer['amount']}")   
                 logged_hhd["trade_to"] = ";".join(trade_to)
+               
 
             df_logger.add(pd.DataFrame(df_logger_helper))
 
             self.blockchain.add_offer(finalized_offers=finalized_offers)
             self.blockchain.trade_event()
+
+            for hh in self.households:
+                self.token_to_battery.handle(hh.battery, self.blockchain.households[hh.id].token)
 
     def finalize_offers(self, optimized_offers: list[dict]) -> dict[str, list[dict]]:
         finalized_offers: dict[str, list[dict]] = defaultdict(list)
