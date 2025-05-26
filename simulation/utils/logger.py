@@ -20,5 +20,5 @@ df_logger: pd.DataFrame = pd.DataFrame()
 def log_df(new_records: pd.DataFrame):
     global df_logger
     df_logger = pd.concat([df_logger, pd.DataFrame(new_records)])
-    df_logger.to_csv("simulation_result.csv")
+    df_logger.to_csv("baseline_simulation_result.csv")
 

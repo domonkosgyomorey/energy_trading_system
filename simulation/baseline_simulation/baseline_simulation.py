@@ -49,6 +49,9 @@ class BaselineSimulator:
             # Heti összevont adatok készítése (96 x 15 perc = 1 nap, így 96 x 7 = 1 hét)
             data_dict = defaultdict(list)
             for key, val in raw_dict.items():
+                if key == 'production':
+                    val = [x * 0.65 for x in val]
+                    
                 for i in range(0, len(val) - 96, 96):
                     week_sum = sum(val[i:i+96])
                     data_dict[key].append(week_sum)
