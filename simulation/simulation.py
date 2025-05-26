@@ -61,6 +61,9 @@ class Simulation:
 
             # Accumulates 96*7*(15 minutes) so accumulated a whole week for testing
             for key, val in raw_dict.items():
+                if key == 'production':
+                    val = [x * 0.65 for x in val]
+
                 for i in range(0, len(val)-96, 96):
                     sum = 0
                     for j in range(96):

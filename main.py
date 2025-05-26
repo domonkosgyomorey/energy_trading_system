@@ -12,5 +12,9 @@ if __name__ == "__main__":
 
     sim = Simulation(household_data)
     logger.info("Start simulation...")
+<<<<<<< Updated upstream
     sim.run(steps=15)
+=======
+    sim.run(steps=90)
+>>>>>>> Stashed changes
     logger.info("Simulation ended...")
