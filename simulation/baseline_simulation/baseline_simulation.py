@@ -107,7 +107,7 @@ class BaselineSimulator:
                     "id": hh.id,
                     "production": round(production, 4),
                     "consumption": round(consumption, 4),
-                    "stored_kwh": round(stored_kwh, 4),
+                    "stored_kwh": round(hh.battery.get_stored_kwh(), 4),
                     "wallet": round(hh.wallet, 4),
                     "grid_energy": round(bought_energy, 4)  # Mennyi energiát vett a várostól
                 })
