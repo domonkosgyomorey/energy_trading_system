@@ -113,6 +113,7 @@ class Simulation:
            
             # Logging the start of a new iteration
             logger.info(f"------Iteration: {step+1}-------")
+            print(f"----{step+1}. Iteration-----")
             
             # Data storeage for the households' production, consumption forecasts
             households_forecasts: dict[str, dict[Literal["production", "consumption"], list[float]]] = {}

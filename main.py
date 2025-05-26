@@ -1,7 +1,7 @@
 from simulation.simulation import Simulation
 import pandas as pd
 from simulation.config import Config
-from simulation.utils.logger import logger, df_logger
+from simulation.utils.logger import logger
 import os
 
 if __name__ == "__main__":
