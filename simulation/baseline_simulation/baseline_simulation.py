@@ -1,12 +1,9 @@
 import pandas as pd
-import json
-from typing import Literal
 from collections import defaultdict
 
 # Szimuláció komponensek
 from simulation.battery.central_battery import CentralBattery
 from simulation.battery.shared_battery import SharedBattery
-from simulation.blockchain import Blockchain
 from simulation.battery.simple_battery import SimpleBattery
 from simulation.city_grid_price_forecaster.simple_city_grid_price_forecaster import SimpleCityGridPriceForecaster
 from simulation.household import Household
