@@ -25,7 +25,6 @@ class SimpleRuleBasedOptimizer(OptimizerStrategy):
 
         # Változók
         G_buy = cp.Variable((N, T), nonneg=True)   
-        G_sell = cp.Variable((N, T), nonneg=True)  
         B = cp.Variable((N, T + 1), nonneg=True)   
         E = cp.Variable((N, N, T), nonneg=True)    
         B_charge = cp.Variable((N, T), nonneg=True)  
@@ -43,7 +42,7 @@ class SimpleRuleBasedOptimizer(OptimizerStrategy):
 
                 # P2P energia korlát: nem lehet több mint termelés + akkumulátor kisütés + grid eladás
                 constraints += [
-                    cp.sum(E[i, :, t]) <= P[i, t] + B_discharge[i, t] + G_sell[i, t]
+                    cp.sum(E[i, :, t]) <= P[i, t] + B_discharge[i, t]
                 ]
 
             for i in range(N):
@@ -59,7 +58,7 @@ class SimpleRuleBasedOptimizer(OptimizerStrategy):
                 # a későbbi időlépéseknél a forecastból vett fogyasztást.
                 consumption = current_C[i] if t == 0 else C[i, t]
 
-                energy_out = consumption + cp.sum(E[i, :, t]) + G_sell[i, t] + B_charge[i, t]
+                energy_out = consumption + cp.sum(E[i, :, t]) + B_charge[i, t]
 
                 constraints += [energy_in == energy_out]
 
@@ -76,7 +75,6 @@ class SimpleRuleBasedOptimizer(OptimizerStrategy):
         early_grid_penalty[0] *= 10
         objective = cp.Minimize(
             cp.sum(cp.multiply(G_buy, early_grid_penalty)) +   # városi vásárlás költsége
-            1 * cp.sum(G_sell) +                                    # eladás minimalizálása (büntetés)
             1 * cp.sum(E)                                          # P2P tranzakciók büntetése
         )
 
@@ -114,15 +112,12 @@ class SimpleRuleBasedOptimizer(OptimizerStrategy):
                     total_p2p_sells += total_energy_sold
 
             grid_buy = sum(G_buy[i, t].value if G_buy[i, t].value is not None else 0 for t in range(T))
-            grid_sell = sum(G_sell[i, t].value if G_sell[i, t].value is not None else 0 for t in range(T))
-            total_discharge = sum(B_discharge[i, t].value if B_discharge[i, t].value is not None else 0 for t in range(T))
 
             output.append({
                 "id": households[i].id,
-                "sells": float(total_p2p_sells + grid_sell),
+                "sells": float(total_p2p_sells),
                 "buys": p2p_transactions,
                 "buy_from_city": float(grid_buy),
-                "used_accumulator": float(total_discharge),
             })
 
         return output
