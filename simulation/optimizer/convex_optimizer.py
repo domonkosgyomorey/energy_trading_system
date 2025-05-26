@@ -118,7 +118,6 @@ class ConvexOptimizer(OptimizerStrategy):
         output = []
         for i in range(N):
             p2p_buys = []
-            p2p_sells = []
 
             for j in range(N):
                 if i != j:
@@ -129,21 +128,11 @@ class ConvexOptimizer(OptimizerStrategy):
                             "amount": float(amount_bought)
                         })
 
-                    amount_sold = E[i, j, 0].value or 0.0
-                    if amount_sold > 1e-6:
-                        p2p_sells.append({
-                            "to": households[j].id,
-                            "amount": float(amount_sold)
-                        })
-
             output.append({
                 "id": households[i].id,
                 "buy_from_city": float(G_buy[i, 0].value or 0),
                 "sell_to_city": float(G_sell[i, 0].value or 0),
-                "charge_battery": float(B_charge[i, 0].value or 0),
-                "discharge_battery": float(B_discharge[i, 0].value or 0),
                 "buys": p2p_buys,
-                "sell": p2p_sells,
             })
 
         return output
