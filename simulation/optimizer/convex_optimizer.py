@@ -4,7 +4,7 @@ from simulation.optimizer.optimizer import OptimizerStrategy
 from simulation.household import Household
 from typing import Literal
 
-class SimpleRuleBasedOptimizer(OptimizerStrategy):
+class ConvexOptimizer(OptimizerStrategy):
 
     def optimize(self, households: list[Household], 
                  forecasts: dict[str, dict[Literal["production", "consumption"], list[float]]], 

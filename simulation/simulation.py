@@ -3,7 +3,7 @@ from simulation.household import Household
 from simulation.blockchain import Blockchain
 from simulation.forecaster.perfect_forecaster import PerfectForecaster
 from simulation.forecaster.forecaster import Forecaster
-from simulation.optimizer.simple_optimizer import SimpleRuleBasedOptimizer
+from simulation.optimizer.convex_optimizer import ConvexOptimizer
 from simulation.optimizer.optimizer import OptimizerStrategy
 from simulation.battery.simple_battery import SimpleBattery
 from simulation.battery.central_battery import CentralBattery
@@ -86,7 +86,7 @@ class Simulation:
         self.forecaster: Forecaster = PerfectForecaster()
 
         # Initializing the optimizer based on Convex Optimization Problem
-        self.optimizer: OptimizerStrategy = SimpleRuleBasedOptimizer()
+        self.optimizer: OptimizerStrategy = ConvexOptimizer()
 
         # Initializing the city's electricity grid price forecaster
         self.city_grid_price_forcaster: CityGridPriceForecaster = SimpleCityGridPriceForecaster()
