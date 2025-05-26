@@ -4,6 +4,8 @@ from typing import Literal
 from collections import defaultdict
 
 # Szimuláció komponensek
+from simulation.battery.central_battery import CentralBattery
+from simulation.battery.shared_battery import SharedBattery
 from simulation.blockchain import Blockchain
 from simulation.battery.simple_battery import SimpleBattery
 from simulation.city_grid_price_forecaster.simple_city_grid_price_forecaster import SimpleCityGridPriceForecaster
@@ -19,8 +21,6 @@ class BaselineSimulator:
         Paraméter:
             household_data (pd.DataFrame): A háztartások termelés/fogyasztás adatai (id, timestamp stb.)
         """
-        # Blockchain példány, csak naplózás céljára
-        self.blockchain: Blockchain = Blockchain()
 
         # Egyszerű városi áramár előrejelző (rögzített vagy szimpla logikával dolgozik)
         self.city_grid_price_forecaster = SimpleCityGridPriceForecaster()
@@ -28,8 +28,14 @@ class BaselineSimulator:
         # Háztartások listája
         self.households: list[Household] = []
 
+        # Makes a global central battery park for the energy community
+        self.central_battery: CentralBattery = CentralBattery(capacity_in_kwh=10000000.0, charge_efficiency=1.0, discharge_efficiency=1.0, tax_per_kwh=0.01)
+        
         # Háztartások csoportosítása azonosító alapján
         grouped = household_data.groupby("id")
+
+       # Tells how ofter do we need to use the central battery
+        no_battery_iter: int = int(grouped.ngroups * Config.HOUSEHOLD_WITHOUT_BATTERY_PROB)
 
         # Maximum háztartás a szimulációban (teszteléshez limitált)
         limit = 5
@@ -50,12 +56,12 @@ class BaselineSimulator:
                     week_sum = sum(val[i:i+96])
                     data_dict[key].append(week_sum)
 
-            # Egyszerű akkumulátor 0 kapacitással (nem tárol energiát)
-            battery = SimpleBattery(capacity_in_kwh=0, charge_efficiency=0, discharge_efficiency=0)
-
-            # Háztartás példány létrehozása
-            self.households.append(Household(id=str(household_id), data=data_dict, battery=battery))
-
+            # Every so often we will use the central battery
+            if iteration_counter % no_battery_iter == 0:
+                self.households.append(Household(id=str(household_id), data=data_dict, battery=SharedBattery(central_battery=self.central_battery,household_id=str(household_id))))
+            else:
+                self.households.append(Household(id=str(household_id), data=data_dict, battery=SimpleBattery(capacity_in_kwh=100, charge_efficiency=1.0, discharge_efficiency=1.0)))
+            
             # Csak az első 'limit' számú háztartást vesszük figyelembe
             if iteration_counter >= limit:
                 break
@@ -87,21 +93,13 @@ class BaselineSimulator:
                 stored_kwh = data["stored_kwh"]
 
                 # Nettó energia: ha negatív, akkor vásárolnunk kell
-                net_energy = production - consumption
+                net_energy = production + hh.battery.retrieve_energy(hh.battery.get_stored_kwh()) - consumption
                 if net_energy < 0:
                     bought_energy = abs(net_energy)
                     hh.wallet -= bought_energy * buy_price  # Vásárolt energia levonása a pénztárcából
                 else:
                     bought_energy = 0  # Nem kell vásárolni, van elég energia
-
-                # Állapot rögzítése a blockchain-ben
-                self.blockchain.add_household_data(
-                    id=hh.id,
-                    production=production,
-                    consumption=consumption,
-                    stored_kwh=stored_kwh,
-                    wallet=hh.wallet
-                )
+                    hh.battery.store_energy(net_energy)
 
                 # Eredmények hozzáadása a naplózáshoz
                 df_logger_helper.append({
