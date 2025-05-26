@@ -13,10 +13,10 @@ class SimpleCityGridPriceForecaster(CityGridPriceForecaster):
     def forecast(self, price_history: list[float], forecast_size: int) -> dict[Literal["sell", "buy"], list[float]]:
         buy_prices: list[float] = [np.random.uniform(self._min_buy, self._max_buy) for _ in range(forecast_size)]
 
-        max_allowed_sell: int = min(buy_prices) - self._min_sell  # sell < min_buy
-        effective_max_sell = min(self._max_sell, max_allowed_sell)
+        max_allowed_sell: float = min(buy_prices) - self._min_sell  # sell < min_buy
+        effective_max_sell: float = min(self._max_sell, max_allowed_sell)
 
-        sell_prices = [np.random.uniform(self._min_sell, effective_max_sell) for _ in range(forecast_size)]
+        sell_prices: list[float] = [np.random.uniform(self._min_sell, effective_max_sell) for _ in range(forecast_size)]
 
         return {
             "sell": sell_prices,
