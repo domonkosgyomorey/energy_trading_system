@@ -12,5 +12,5 @@ if __name__ == "__main__":
 
     sim = Simulation(household_data)
     logger.info("Start simulation...")
-    sim.run(steps=15)
+    sim.run(steps=30)
     logger.info("Simulation ended...")
