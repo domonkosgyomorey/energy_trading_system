@@ -30,10 +30,10 @@ class CentralBattery:
         return {household_id: stored_kwh*self.tax_per_kwh for household_id, stored_kwh in self.households_shared_battery.items()}
 
     def get_stored_kwh(self, household_id: str) -> float:
-        return self.households_shared_battery.get(household_id, 0.0)
+        return self.households_shared_battery.get(household_id, 0.01)
 
-    def get_capacity_in_kwh(self) -> float:
-        return self.capacity_in_kwh
+    def get_capacity_in_kwh(self, household_id: str) -> float:
+        return self.households_shared_battery.get(household_id, 0)*1.2
 
     def get_tax_per_kwh(self, household_id: str) -> float:
         return self.tax_per_kwh * self.households_shared_battery.get(household_id, 0.0)

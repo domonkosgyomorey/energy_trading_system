@@ -9,6 +9,7 @@ from simulation.battery.simple_battery import SimpleBattery
 from simulation.battery.central_battery import CentralBattery
 from simulation.battery.shared_battery import SharedBattery 
 from simulation.token_to_battery import TokenToBattery
+from simulation.local_price_estimator.price_estimator import PriceEstimator
 from simulation.config import Config
 from simulation.city_grid_price_forecaster.simple_city_grid_price_forecaster import SimpleCityGridPriceForecaster
 from simulation.city_grid_price_forecaster.city_gird_price_forecaster import CityGridPriceForecaster
@@ -60,10 +61,10 @@ class Simulation:
 
             # Accumulates 96*7*(15 minutes) so accumulated a whole week for testing
             for key, val in raw_dict.items():
-                for i in range(0, len(val)-96*7, 96*7):
+                for i in range(0, len(val)-96, 96):
                     sum = 0
-                    for j in range(96*7):
-                        sum += abs(val[i+j])
+                    for j in range(96):
+                        sum += val[i+j]
                     data_dict[key].append(sum)                
 
             # Every so often we will use the central battery
@@ -94,6 +95,9 @@ class Simulation:
         # Initializing the battery updater with the tokens
         self.token_to_battery: TokenToBattery = TokenToBattery()
 
+        # Local energy price estimator
+        self.local_energy_price_estimator: PriceEstimator = PriceEstimator()
+
     def run(self, steps: int):
         """
         Description: Runs the simulation for the requested steps amount
@@ -118,18 +122,29 @@ class Simulation:
             # Data storeage for the households' production, consumption forecasts
             households_forecasts: dict[str, dict[Literal["production", "consumption"], list[float]]] = {}
             
-            # Data storage for the current energy consumption for each household
-            currect_household_consumption: dict[str, float] = {} 
+            # Data storage for the current energy consumption and production for each household
+            current_household_consumption: dict[str, float] = {}
+            current_household_production: dict[str, float] = {}
+
+            # Overall production, consumption data
+            overall_energy_production_consumption: dict[Literal["production", "consumption"], float] = {
+                "production" : 0,
+                "consumption": 0
+            }
 
             # Update each household and collect information about them for this iteration
             for hh in self.households:
 
-                # Update the battery with the currect production and gives information about
-                # the current prodcution, consumpotion and the battery state
-                current_info: dict[Literal["production", "consumption", "stored_kwh"], float] = hh.update_battery_with_production_and_get_sensor_data(iteration=step)
+                # Gives information about the current prodcution, consumpotion and the battery and wallet state
+                current_info: dict[Literal["production", "consumption", "stored_kwh", "wallet"], float] = hh.get_sensor_data(iteration=step)
                 
-                # Save the current consumption data for the optimizer
-                currect_household_consumption[hh.id] = current_info["consumption"]
+                # Save the current consumption and production data for the optimizer
+                current_household_consumption[hh.id] = current_info["consumption"]
+                current_household_production[hh.id] = current_info["production"]
+
+                # Save the overall energy production and consumption
+                overall_energy_production_consumption["production"] += current_info["production"]
+                overall_energy_production_consumption["consumption"] += current_info["consumption"]
 
                 # Logging the household state
                 df_logger_helper.append({
@@ -137,7 +152,8 @@ class Simulation:
                     "id": hh.id,
                     "production": round(current_info["production"], ndigits=4),
                     "consumption": round(current_info["consumption"], ndigits=4),
-                    "stored_kwh": round(current_info["stored_kwh"], ndigits=4)
+                    "stored_kwh": round(current_info["stored_kwh"], ndigits=4),
+                    "wallet": round(current_info["wallet"], ndigits=4),
                 })
 
                 # Logging the household state
@@ -145,11 +161,12 @@ class Simulation:
                     "iteration": step,
                     "production": round(current_info["production"], ndigits=4),
                     "consumption": round(current_info["consumption"], ndigits=4),
-                    "stored_kwh": round(current_info["stored_kwh"], ndigits=4)
+                    "stored_kwh": round(current_info["stored_kwh"], ndigits=4),
+                    "wallet": round(current_info["wallet"], ndigits=4)
                 }
 
                 # Store the current household's state in the blockchain
-                self.blockchain.add_household_data(id=hh.id, production=current_info["production"], consumption=current_info["consumption"], stored_kwh=current_info["stored_kwh"])
+                self.blockchain.add_household_data(id=hh.id, production=current_info["production"], consumption=current_info["consumption"], stored_kwh=current_info["stored_kwh"], wallet=current_info["wallet"])
                 
                 # Make production/consumption forecast for each household
                 households_forecasts[hh.id] = self.forecaster.forecast(household=hh, iteration=step, forecast_size=Config.FORECASTER_PRED_SIZE) 
@@ -161,7 +178,13 @@ class Simulation:
             city_grid_price_forcast = self.city_grid_price_forcaster.forecast(price_history=[], forecast_size=Config.CITY_GRID_PRICE_PRED_SIZE)
 
             # Make trades and actions what the household should take to create an optimal energy community
-            trade_plan = self.optimizer.optimize(self.households, households_forecasts, city_grid_price_forcast, currect_household_consumption)
+            trade_plan = self.optimizer.optimize(
+                self.households, households_forecasts, 
+                city_grid_price_forcast["buy"], 
+                city_grid_price_forcast["sell"], 
+                current_household_consumption, 
+                current_household_production, 
+                self.local_energy_price_estimator)
 
             # Re-structures the trade plan into a more useful format
             finalized_offers = self.finalize_offers(trade_plan)
@@ -175,10 +198,12 @@ class Simulation:
                 # Logs the trades
                 logged_hhd["trades_from"] = "-".join(trades_from)
                 logged_hhd["amount_from_city"] = round(finalized_offers[logged_hhd["id"]]["amount_from_city"],ndigits=4)
+                logged_hhd["amount_to_city"] = round(finalized_offers[logged_hhd["id"]]["amount_to_city"], ndigits=4)
                 logged_hhd["central_battery_tax"] = round(self.central_battery.get_tax_per_kwh(logged_hhd["id"]),ndigits=4)
                 
                 logger_helper[logged_hhd["id"]]["trades_from"] = "-".join(trades_from)
                 logger_helper[logged_hhd["id"]]["amount_from_city"] = round(finalized_offers[logged_hhd["id"]]["amount_from_city"],ndigits=4)
+                logger_helper[logged_hhd["id"]]["amount_to_city"] = round(finalized_offers[logged_hhd["id"]]["amount_to_city"], ndigits=4)
                 logger_helper[logged_hhd["id"]]["central_battery_tax"] = round(self.central_battery.get_tax_per_kwh(logged_hhd["id"]),ndigits=4)
                 
 
@@ -197,11 +222,18 @@ class Simulation:
             self.blockchain.add_trades(finalized_offers=finalized_offers)
             
             # Executes all of the trades
-            self.blockchain.trade_event()
+            self.blockchain.trade_event(
+                    local_energy_price=self.local_energy_price_estimator.calculate_price(
+                                            total_production=overall_energy_production_consumption["production"], 
+                                            total_consumption=overall_energy_production_consumption["consumption"]),
+                    city_buy_price=city_grid_price_forcast["buy"][0],
+                    city_sell_price=city_grid_price_forcast["sell"][0]
+            )
 
-            # After the trades updates batteries for each household
+            # After the trades updates batteries and wallets for each household
             for hh in self.households:
                 self.token_to_battery.handle(hh.battery, self.blockchain.households[hh.id].token)
+                hh.wallet = self.blockchain.households[hh.id].wallet
 
     def finalize_offers(self, optimized_offers: list[dict]) -> dict[str, dict]:
         """
@@ -216,6 +248,7 @@ class Simulation:
             hh_stats: dict = {
                 "trades_from": [],
                 "amount_from_city": offers["buy_from_city"],
+                "amount_to_city": offers["sell_to_city"]
             }
             for offer in offers["buys"]:
                 hh_stats["trades_from"].append({

@@ -16,7 +16,7 @@ file_handler.setFormatter(formatter)
 logger.handlers.clear()
 logger.addHandler(file_handler)
 
-df_logger: pd.DataFrame = pd.DataFrame(columns=["iteration", "id", "production", "consumption", "stored_kwh", "trades_from", "amount_from_city", "central_battery_tax"])
+df_logger: pd.DataFrame = pd.DataFrame()
 def log_df(new_records: pd.DataFrame):
     global df_logger
     df_logger = pd.concat([df_logger, pd.DataFrame(new_records)])

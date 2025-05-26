@@ -10,6 +10,7 @@ from dataclasses import dataclass, asdict
 class HouseholdTrades:
     trades_from: list[dict]
     amount_from_city: float
+    amount_to_city: float
     central_battery_tax: float
 
 class HouseholdData:
@@ -17,17 +18,21 @@ class HouseholdData:
         self.id:str = id
         self.production: deque[float] = deque(maxlen=Config.FORECASTER_HIST_SIZE) 
         self.consumption: deque[float] = deque(maxlen=Config.FORECASTER_HIST_SIZE)
-        self.trades: HouseholdTrades
+        self.wallet: float = 0 
+        self.trades: HouseholdTrades 
         self.token: float = 0
 
     def __str__(self) -> str:
-        return f"{{id:{self.id},production:{self.production[-1]},consumption:{self.consumption[-1]},token:{self.token}}}"
+        return f"{{id:{self.id},production:{self.production[-1]},consumption:{self.consumption[-1]},wallet:{self.wallet},token:{self.token}}}"
+
 
     def to_dict(self) -> dict:
         return {
             "id": self.id,
             "production": self.production,
             "consumption": self.consumption,
+            "wallet": self.wallet,
+            "trades": self.trades,
             "token": self.token
         }
 
@@ -59,12 +64,13 @@ class Blockchain:
         new_block = Block(len(self.chain), time.time(), data, previous_block.hash)
         self.chain.append(new_block)
 
-    def add_household_data(self, id: str, production: float, consumption: float, stored_kwh: float) -> None:
+    def add_household_data(self, id: str, production: float, consumption: float, wallet: float, stored_kwh: float) -> None:
         if self.households.get(id) is None:
             self.households[id] = HouseholdData(id=id)
         
         self.households[id].production.append(production)
         self.households[id].consumption.append(consumption)
+        self.households[id].wallet = wallet
         self.households[id].token = stored_kwh
         self.add_block(self.households[id].__str__())
 
@@ -76,21 +82,47 @@ class Blockchain:
         for household_id, _ in finalized_offers.items():
             self.households[household_id].trades = HouseholdTrades(**finalized_offers[household_id])
 
-    def trade_event(self) -> None:
+    def trade_event(self, local_energy_price: float, city_buy_price: float, city_sell_price: float) -> None:
         trading_strs: list[str] = []
+
         for address, household in self.households.items():
             if household.trades is None:
                 continue
-            
+
+            # --- P2P kereskedés lebonyolítása ---
+            p2p_total_sold = 0
             for trade in household.trades.trades_from:
-                self.households[trade["seller"]].token -= trade["amount"]
-                household.token += trade["amount"]
-            
+                seller = self.households[trade["seller"]]
+                amount = trade["amount"]
+
+                seller.token -= amount
+                seller.wallet += amount * local_energy_price
+
+                household.token += amount
+                household.wallet -= amount * local_energy_price
+
+                p2p_total_sold += amount
+
+            # --- Nettó termelés (bruttó - p2p eladott) ---
+            net_production = household.production[-1] - p2p_total_sold
+            household.token += net_production
+
+            # --- Városból vétel ---
             household.token += household.trades.amount_from_city
+            household.wallet -= household.trades.amount_from_city * city_buy_price
+
+            # --- Városba eladás ---
+            household.token -= household.trades.amount_to_city
+            household.wallet += household.trades.amount_to_city * city_sell_price
+
+            # --- Központi akku adó ---
             household.token -= household.trades.central_battery_tax
+
+            # --- Fogyasztás ---
             household.token -= household.consumption[-1]
 
-            trading_strs.append(address+":"+json.dumps(asdict(household.trades), ensure_ascii=False))
+            # --- Tranzakció napló ---
+            trading_strs.append(address + ":" + json.dumps(asdict(household.trades), ensure_ascii=False))
 
         self.add_block(";".join(trading_strs))
 

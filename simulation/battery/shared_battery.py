@@ -17,7 +17,7 @@ class SharedBattery(Battery):
         return self.central_battery.get_stored_kwh(household_id=self.household_id)
 
     def get_capacity_in_kwh(self) -> float:
-        return self.central_battery.get_capacity_in_kwh()
+        return self.central_battery.get_capacity_in_kwh(household_id=self.household_id)
 
     def get_fields(self) -> dict:
         return {

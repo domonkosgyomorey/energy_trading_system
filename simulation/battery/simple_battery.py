@@ -5,7 +5,7 @@ class SimpleBattery(Battery):
         self.capacity_in_kwh: float = capacity_in_kwh
         self.charge_efficiency: float = charge_efficiency
         self.discharge_efficiency: float = discharge_efficiency
-        self.stored_kwh: float = 0.0
+        self.stored_kwh: float = 5.0
 
     def store_energy(self, amount: float) -> None:
         amount *= self.charge_efficiency
