@@ -12,6 +12,7 @@ from simulation.token_to_battery import TokenToBattery
 from simulation.config import Config
 from simulation.city_grid_price_forecaster.simple_city_grid_price_forecaster import SimpleCityGridPriceForecaster
 from simulation.city_grid_price_forecaster.city_gird_price_forecaster import CityGridPriceForecaster
+from simulation.optimizer.simple_optimizer import RuleBasedOptimizer
 import json
 import pandas as pd
 from typing import Literal
@@ -86,7 +87,7 @@ class Simulation:
         self.forecaster: Forecaster = PerfectForecaster()
 
         # Initializing the optimizer based on Convex Optimization Problem
-        self.optimizer: OptimizerStrategy = ConvexOptimizer()
+        self.optimizer: OptimizerStrategy = RuleBasedOptimizer()
 
         # Initializing the city's electricity grid price forecaster
         self.city_grid_price_forcaster: CityGridPriceForecaster = SimpleCityGridPriceForecaster()
