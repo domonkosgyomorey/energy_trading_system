@@ -13,5 +13,5 @@ if __name__ == "__main__":
 
     sim = BaselineSimulator(household_data)
     logger.info("Start simulation...")
-    sim.run(steps=30)
+    sim.run(steps=90)
     logger.info("Simulation ended...")
