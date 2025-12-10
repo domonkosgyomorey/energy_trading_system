@@ -3,8 +3,10 @@ from collections import deque
 import json
 import time
 
-from simulation.config import Config
 from dataclasses import dataclass, asdict
+
+# Default history size for household data tracking
+DEFAULT_HISTORY_SIZE = 10
 
 @dataclass()
 class HouseholdTrades:
@@ -14,10 +16,10 @@ class HouseholdTrades:
     central_battery_tax: float
 
 class HouseholdData:
-    def __init__(self,  id: str):
+    def __init__(self,  id: str, history_size: int = DEFAULT_HISTORY_SIZE):
         self.id:str = id
-        self.production: deque[float] = deque(maxlen=Config.FORECASTER_HIST_SIZE) 
-        self.consumption: deque[float] = deque(maxlen=Config.FORECASTER_HIST_SIZE)
+        self.production: deque[float] = deque(maxlen=history_size) 
+        self.consumption: deque[float] = deque(maxlen=history_size)
         self.wallet: float = 0 
         self.trades: HouseholdTrades 
         self.token: float = 0
@@ -89,7 +91,7 @@ class Blockchain:
             if household.trades is None:
                 continue
 
-            # --- P2P kereskedés lebonyolítása ---
+            # --- Execute P2P trading ---
             p2p_total_sold = 0
             for trade in household.trades.trades_from:
                 seller = self.households[trade["seller"]]
@@ -103,25 +105,25 @@ class Blockchain:
 
                 p2p_total_sold += amount
 
-            # --- Nettó termelés (bruttó - p2p eladott) ---
+            # --- Net production (gross - p2p sold) ---
             net_production = household.production[-1] - p2p_total_sold
             household.token += net_production
 
-            # --- Városból vétel ---
+            # --- Purchase from city ---
             household.token += household.trades.amount_from_city
             household.wallet -= household.trades.amount_from_city * city_buy_price
 
-            # --- Városba eladás ---
+            # --- Sell to city ---
             household.token -= household.trades.amount_to_city
             household.wallet += household.trades.amount_to_city * city_sell_price
 
-            # --- Központi akku adó ---
+            # --- Central battery tax ---
             household.token -= household.trades.central_battery_tax
 
-            # --- Fogyasztás ---
+            # --- Consumption ---
             household.token -= household.consumption[-1]
 
-            # --- Tranzakció napló ---
+            # --- Transaction log ---
             trading_strs.append(address + ":" + json.dumps(asdict(household.trades), ensure_ascii=False))
 
         self.add_block(";".join(trading_strs))
