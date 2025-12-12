@@ -29,7 +29,7 @@
     "noise_std": 0.05
   },
   "forecaster": {
-    "history_size": 5,
+    "history_size": 10,
     "prediction_size": 5,
     "city_grid_price_prediction_size": 5
   },
@@ -40,15 +40,15 @@
     "initial_wallet": 100.0
   },
   "optimizer": {
-    "optimizer_type": "greedy",
+    "optimizer_type": "convex",
     "battery_charge_rate_factor": 0.5,
     "wallet_penalty_weight": 1000.0,
     "p2p_transaction_cost": 0.25,
     "min_trade_threshold": 0.5,
     "solver": "CLARABEL",
     "warm_start": true,
-    "max_neighbors": 3,
-    "p2p_price_factor": 0.5,
+    "max_neighbors": 5,
+    "p2p_price_factor": 0.8,
     "battery_target_pct": 0.5
   },
   "simulation_steps": 90,

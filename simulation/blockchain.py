@@ -51,9 +51,10 @@ class Block:
         return hashlib.sha256(block_string.encode()).hexdigest()
 
 class Blockchain:
-    def __init__(self):
+    def __init__(self, history_size: int = DEFAULT_HISTORY_SIZE):
         self.chain: list[Block] = [self.create_genesis_block()]
         self.households: dict[str, HouseholdData] = {}
+        self.history_size: int = history_size
         
     def create_genesis_block(self) -> Block:
         return Block(0, time.time(), "Genesis Block", "0")
@@ -68,7 +69,7 @@ class Blockchain:
 
     def add_household_data(self, id: str, production: float, consumption: float, wallet: float, stored_kwh: float) -> None:
         if self.households.get(id) is None:
-            self.households[id] = HouseholdData(id=id)
+            self.households[id] = HouseholdData(id=id, history_size=self.history_size)
         
         self.households[id].production.append(production)
         self.households[id].consumption.append(consumption)

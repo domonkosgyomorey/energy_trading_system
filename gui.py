@@ -618,7 +618,8 @@ class SimulationGUI(tk.Tk, SimulationObserver):
                 steps=steps,
                 base_import_kw=self.gen_import_var.get(),
                 base_export_kw=self.gen_export_var.get(),
-                peak_hour_reduction=self.gen_peak_var.get()
+                peak_hour_reduction=self.gen_peak_var.get(),
+                noise_std=self.params.grid_capacity.noise_std
             )
             self.gc_status.config(text=f"✓ Generated: {steps} timesteps")
             self.status_var.set("Synthetic grid capacity data generated")

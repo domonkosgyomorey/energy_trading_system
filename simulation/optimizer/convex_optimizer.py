@@ -30,7 +30,9 @@ class ConvexOptimizer(OptimizerStrategy):
         min_trade_threshold: float = 0.1,
         solver: str = "CLARABEL",
         warm_start: bool = True,
-        max_neighbors: int | None = None
+        max_neighbors: int | None = None,
+        battery_charge_rate_factor: float = 0.5,
+        wallet_penalty_weight: float = 1000.0
     ):
         """
         Initialize the optimizer.
@@ -47,6 +49,8 @@ class ConvexOptimizer(OptimizerStrategy):
         self.solver_name = solver.upper()
         self.warm_start = warm_start
         self.max_neighbors = max_neighbors
+        self.battery_charge_rate_factor = battery_charge_rate_factor
+        self.wallet_penalty_weight = wallet_penalty_weight
         
         # Cache for warm starting
         self._prev_solution: dict | None = None
@@ -131,7 +135,7 @@ class ConvexOptimizer(OptimizerStrategy):
                     B[i, t + 1] == B[i, t] + B_charge[i, t] * eta_charge[i] - B_discharge[i, t] / eta_discharge[i]
                 ]
 
-                max_rate = B_max[i] * 0.5  # 50% max charge/discharge rate
+                max_rate = B_max[i] * self.battery_charge_rate_factor
                 constraints += [
                     B_charge[i, t] <= max_rate,
                     B_discharge[i, t] <= max_rate,
@@ -188,7 +192,7 @@ class ConvexOptimizer(OptimizerStrategy):
             cp.sum(cp.multiply(G_buy, city_grid_prices_forecast))      # Cost of buying from grid
             - cp.sum(cp.multiply(G_sell, city_grid_sell_prices_forecast))  # Revenue from selling to grid
             + p2p_incentive_weight * cp.sum(cp.abs(net_P2P))           # Small incentive for P2P trading
-            + 100 * cp.sum(cp.pos(-wallet))                            # Penalty for negative balance
+            + self.wallet_penalty_weight * cp.sum(cp.pos(-wallet))     # Penalty for negative balance
             + transaction_cost_penalty                                  # Transaction cost for P2P trades
         )
 

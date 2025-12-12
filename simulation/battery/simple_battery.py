@@ -1,11 +1,11 @@
 from simulation.battery.battery import Battery
 
 class SimpleBattery(Battery):
-    def __init__(self, capacity_in_kwh: float, charge_efficiency: float, discharge_efficiency: float):
+    def __init__(self, capacity_in_kwh: float, charge_efficiency: float, discharge_efficiency: float, initial_charge_kwh: float = 5.0):
         self.capacity_in_kwh: float = capacity_in_kwh
         self.charge_efficiency: float = charge_efficiency
         self.discharge_efficiency: float = discharge_efficiency
-        self.stored_kwh: float = 5.0
+        self.stored_kwh: float = min(initial_charge_kwh, capacity_in_kwh)
 
     def store_energy(self, amount: float) -> None:
         amount *= self.charge_efficiency

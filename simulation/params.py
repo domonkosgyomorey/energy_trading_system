@@ -98,8 +98,8 @@ class SimulationParams:
     household: HouseholdParams = field(default_factory=HouseholdParams)
     optimizer: OptimizerParams = field(default_factory=OptimizerParams)
     
-    simulation_steps: int = 90
-    time_step_hours: float = 24.0  # Each step represents this many hours
+    simulation_steps: int = 90  # Number of simulation steps to run
+    time_step_hours: float = 24.0  # Duration of each step in hours
     
     def save(self, filepath: str) -> None:
         """Save parameters to JSON file."""
