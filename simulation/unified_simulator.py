@@ -108,14 +108,40 @@ class UnifiedSimulator:
         
     def _prepare_household_data(self) -> dict[str, dict]:
         """Process raw household data into usable format."""
+        from simulation.household_type_manager import HouseholdTypeManager, HouseholdTypeConfig
+        
         grouped = self.household_data.groupby("id")
+        all_household_ids = list(grouped.groups.keys())
+        
+        # Determine which households to use based on type selection
+        if self.params.household.type_selection:
+            # Use type-based selection
+            type_manager = HouseholdTypeManager()
+            type_manager.analyze_household_ids(all_household_ids)
+            
+            config = HouseholdTypeConfig(
+                type_counts=self.params.household.type_selection,
+                random_selection=self.params.household.random_type_selection
+            )
+            selected_ids = type_manager.select_households(config)
+            
+            logger.info(f"Using type-based selection: {len(selected_ids)} households")
+            for type_prefix, count in self.params.household.type_selection.items():
+                logger.info(f"  {type_prefix}: {count} households")
+        else:
+            # Use traditional max_households selection
+            selected_ids = all_household_ids[:self.params.household.max_households]
+        
         processed = {}
         
         # Calculate samples per step based on time_step_hours
         # Raw data is 15-minute intervals (96 samples = 24 hours)
         samples_per_step = max(1, int(self.params.time_step_hours * 4))  # 4 samples per hour
         
-        for household_id, group in grouped:
+        for household_id in selected_ids:
+            if household_id not in grouped.groups:
+                continue
+            group = grouped.get_group(household_id)
             group = group.drop(columns=["id", "timestamp", "category", "season", "period"], errors='ignore')
             raw_dict = {col: group[col].to_list() for col in group.columns}
             
@@ -136,9 +162,6 @@ class UnifiedSimulator:
                         data_dict[key].append(step_sum)
             
             processed[str(household_id)] = dict(data_dict)
-            
-            if len(processed) >= self.params.household.max_households:
-                break
         
         return processed
     
@@ -200,6 +223,8 @@ class UnifiedSimulator:
                 max_neighbors=self.params.optimizer.max_neighbors,
                 battery_target_pct=self.params.optimizer.battery_target_pct,
                 p2p_price_factor=self.params.optimizer.p2p_price_factor,
+                smart_battery_strategy=self.params.optimizer.smart_battery_strategy,
+                prefer_p2p_over_grid=self.params.optimizer.prefer_p2p_over_grid,
             )
         else:  # "convex"
             self.optimizer = ConvexOptimizer(

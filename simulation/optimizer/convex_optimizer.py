@@ -223,12 +223,49 @@ class ConvexOptimizer(OptimizerStrategy):
         try:
             problem.solve(solver=solver, **solve_kwargs)
             if problem.status not in [cp.OPTIMAL, cp.OPTIMAL_INACCURATE]:
-                problem.solve(solver=cp.SCS, verbose=False)
-        except Exception:
-            problem.solve(solver=cp.SCS, verbose=False)
+                # Try with verbose output to get more info
+                problem.solve(solver=cp.SCS, verbose=True, max_iters=5000)
+        except Exception as e:
+            print(f"Solver exception: {e}")
+            problem.solve(solver=cp.SCS, verbose=True, max_iters=5000)
 
         if problem.status not in [cp.OPTIMAL, cp.OPTIMAL_INACCURATE]:
-            raise RuntimeError(f"Optimization failed: {problem.status}")
+            # Provide detailed diagnostic information
+            total_prod = np.sum(P[:, 0])
+            total_cons = np.sum(C[:, 0])
+            total_battery_capacity = np.sum(B_max)
+            grid_import = grid_import_capacity_forecast[0]
+            grid_export = grid_export_capacity_forecast[0]
+            
+            diagnostic = (
+                f"\n{'='*60}\n"
+                f"OPTIMIZATION INFEASIBLE - Diagnostic Info:\n"
+                f"{'='*60}\n"
+                f"Status: {problem.status}\n"
+                f"Households: {N}\n"
+                f"Timesteps: {T}\n"
+                f"Total Production (t=0): {total_prod:.2f} kWh\n"
+                f"Total Consumption (t=0): {total_cons:.2f} kWh\n"
+                f"Net Demand: {total_cons - total_prod:.2f} kWh\n"
+                f"Grid Import Capacity: {grid_import:.2f} kW\n"
+                f"Grid Export Capacity: {grid_export:.2f} kW\n"
+                f"Total Battery Capacity: {total_battery_capacity:.2f} kWh\n"
+                f"Initial Battery Stored: {np.sum(B0):.2f} kWh\n"
+                f"\nPossible causes:\n"
+                f"1. Grid capacity too low: Need {total_cons - total_prod:.2f} kWh but can import {grid_import:.2f} kW\n"
+                f"2. Battery constraints too tight (charge rate factor: {self.battery_charge_rate_factor})\n"
+                f"3. Wallet penalty too high: {self.wallet_penalty_weight}\n"
+                f"4. Solver tolerance issues with large problems (try reducing households or timesteps)\n"
+                f"\nSuggestions:\n"
+                f"- Increase grid import capacity to at least {max(0, total_cons - total_prod) * 1.2:.2f} kW\n"
+                f"- Reduce wallet_penalty_weight (current: {self.wallet_penalty_weight})\n"
+                f"- Increase battery_charge_rate_factor (current: {self.battery_charge_rate_factor})\n"
+                f"- Try GREEDY optimizer instead (faster, more robust)\n"
+                f"- Reduce households or prediction_size\n"
+                f"{'='*60}\n"
+            )
+            print(diagnostic)
+            raise RuntimeError(f"Optimization failed: {problem.status}\n{diagnostic}")
         
         # Save solution for warm-starting next iteration
         if self.warm_start:

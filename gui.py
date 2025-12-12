@@ -14,13 +14,19 @@ from simulation.params import SimulationParams
 from simulation.grid_capacity_data import GridCapacityData, generate_synthetic_grid_capacity
 from simulation.data_collector import SimulationDataCollector, StepData, SimulationObserver
 from simulation.unified_simulator import UnifiedSimulator
+from simulation.household_type_manager import HouseholdTypeManager, HouseholdTypeConfig
 
-# Attempt to import matplotlib for plotting
+# Attempt to import matplotlib for plotting with hardware acceleration
 try:
     import matplotlib
-    matplotlib.use('TkAgg')
+    matplotlib.use('TkAgg')  # Use Tk backend
     from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
     from matplotlib.figure import Figure
+    import matplotlib.pyplot as plt
+    # Enable hardware acceleration for better performance
+    plt.rcParams['path.simplify'] = True
+    plt.rcParams['path.simplify_threshold'] = 1.0
+    plt.rcParams['agg.path.chunksize'] = 10000
     HAS_MATPLOTLIB = True
 except ImportError:
     HAS_MATPLOTLIB = False
@@ -156,15 +162,42 @@ class SimulationGUI(tk.Tk, SimulationObserver):
             "Duration of each simulation step in hours. E.g., 24 = daily resolution, 1 = hourly resolution.")
         
         # === Household Section ===
-        hh_section = CollapsibleFrame(self.params_inner, "🏠 Household", expanded=True)
+        hh_section = CollapsibleFrame(self.params_inner, "🏠 Household Selection", expanded=True)
         hh_section.pack(fill=tk.X, pady=2)
         hh_content = hh_section.get_content_frame()
         
-        self._add_param_row(hh_content, "max_households", "Max Households", self.params.household.max_households, 0,
-            "Maximum number of households to include in the simulation. More households = longer computation time.")
-        self._add_param_row(hh_content, "shared_battery_probability", "Shared Battery Prob", self.params.household.shared_battery_probability, 1,
+        # Selection mode radio buttons
+        self.selection_mode_var = tk.StringVar(value="simple")
+        mode_frame = ttk.Frame(hh_content)
+        mode_frame.grid(row=0, column=0, columnspan=3, sticky="w", padx=5, pady=5)
+        ttk.Label(mode_frame, text="Selection Mode:", font=("TkDefaultFont", 9, "bold")).pack(side=tk.LEFT, padx=5)
+        ttk.Radiobutton(mode_frame, text="Simple (Max N)", variable=self.selection_mode_var, 
+                       value="simple", command=self._on_selection_mode_change).pack(side=tk.LEFT, padx=5)
+        ttk.Radiobutton(mode_frame, text="By Type", variable=self.selection_mode_var, 
+                       value="by_type", command=self._on_selection_mode_change).pack(side=tk.LEFT, padx=5)
+        
+        # Simple mode widgets
+        self.simple_mode_frame = ttk.Frame(hh_content)
+        self.simple_mode_frame.grid(row=1, column=0, columnspan=3, sticky="ew", padx=5, pady=2)
+        self._add_param_row(self.simple_mode_frame, "max_households", "Max Households", self.params.household.max_households, 0,
+            "Maximum number of households to randomly select from loaded data.")
+        
+        # Type selection widgets (initially hidden)
+        self.type_mode_frame = ttk.LabelFrame(hh_content, text="Select Household Types", padding=5)
+        self.type_mode_frame.grid(row=2, column=0, columnspan=3, sticky="ew", padx=5, pady=5)
+        self.type_mode_frame.grid_remove()  # Hide initially
+        
+        # Placeholder for type selection widgets
+        self.type_vars = {}
+        self.type_widgets_container = None
+        
+        ttk.Button(hh_content, text="📂 Load Household Data to Select Types", 
+                  command=self._load_household_data_for_selection).grid(row=3, column=0, columnspan=3, pady=5)
+        
+        # Other household params
+        self._add_param_row(hh_content, "shared_battery_probability", "Shared Battery Prob", self.params.household.shared_battery_probability, 4,
             "Probability (0-1) that a household uses the shared central battery instead of having its own battery.")
-        self._add_param_row(hh_content, "initial_wallet", "Initial Wallet ($)", self.params.household.initial_wallet, 2,
+        self._add_param_row(hh_content, "initial_wallet", "Initial Wallet ($)", self.params.household.initial_wallet, 5,
             "Starting wallet balance for each household. Negative values are allowed.")
         
         # === Battery Section ===
@@ -332,6 +365,145 @@ class SimulationGUI(tk.Tk, SimulationObserver):
         
         widget.bind("<Enter>", show_tooltip)
     
+    def _on_selection_mode_change(self) -> None:
+        """Handle household selection mode change."""
+        mode = self.selection_mode_var.get()
+        if mode == "simple":
+            self.simple_mode_frame.grid()
+            self.type_mode_frame.grid_remove()
+        else:  # by_type
+            self.simple_mode_frame.grid_remove()
+            self.type_mode_frame.grid()
+    
+    def _load_household_data_for_selection(self) -> None:
+        """Load household data and show type selection UI in Parameters tab."""
+        path = filedialog.askopenfilename(
+            initialdir=self.params.paths.household_db_dir if hasattr(self.params.paths, 'household_db_dir') else ".",
+            filetypes=[("Parquet files", "*.parquet"), ("CSV files", "*.csv"), ("All files", "*.*")],
+            title="Select Household Data for Type Selection"
+        )
+        
+        if not path:
+            return
+        
+        try:
+            if path.endswith('.parquet'):
+                temp_data = pd.read_parquet(path)
+            else:
+                temp_data = pd.read_csv(path)
+            
+            # Store path for later use
+            self.hh_path_var.set(path)
+            self.household_data = temp_data
+            
+            # Analyze and show types
+            self._show_household_type_selection_in_params()
+            
+            n_households = temp_data['id'].nunique() if 'id' in temp_data.columns else 'unknown'
+            messagebox.showinfo("Data Loaded", 
+                              f"Loaded {n_households} households.\nNow you can select types below.")
+            
+        except Exception as e:
+            messagebox.showerror("Error", f"Failed to load household data: {e}")
+    
+    def _show_household_type_selection_in_params(self) -> None:
+        """Show household type selection UI in Parameters tab."""
+        if self.household_data is None:
+            return
+        
+        # Analyze household types
+        from simulation.household_type_manager import HouseholdTypeManager
+        type_manager = HouseholdTypeManager()
+        household_ids = self.household_data['id'].unique()
+        type_manager.analyze_household_ids(household_ids)
+        types_summary = type_manager.get_type_summary()
+        
+        # Clear previous widgets in type_mode_frame
+        for widget in self.type_mode_frame.winfo_children():
+            widget.destroy()
+        self.type_vars.clear()
+        
+        # Create scrollable canvas
+        canvas = tk.Canvas(self.type_mode_frame, height=150)
+        scrollbar = ttk.Scrollbar(self.type_mode_frame, orient="vertical", command=canvas.yview)
+        scrollable_frame = ttk.Frame(canvas)
+        
+        scrollable_frame.bind(
+            "<Configure>",
+            lambda e: canvas.configure(scrollregion=canvas.bbox("all"))
+        )
+        
+        canvas.create_window((0, 0), window=scrollable_frame, anchor="nw")
+        canvas.configure(yscrollcommand=scrollbar.set)
+        
+        # Header
+        ttk.Label(scrollable_frame, text="Type", font=("TkDefaultFont", 9, "bold")).grid(row=0, column=0, padx=5, pady=2, sticky="w")
+        ttk.Label(scrollable_frame, text="Available", font=("TkDefaultFont", 9, "bold")).grid(row=0, column=1, padx=5, pady=2)
+        ttk.Label(scrollable_frame, text="☑", font=("TkDefaultFont", 9, "bold")).grid(row=0, column=2, padx=5, pady=2)
+        ttk.Label(scrollable_frame, text="Count", font=("TkDefaultFont", 9, "bold")).grid(row=0, column=3, padx=5, pady=2)
+        
+        # Create row for each type
+        for i, (type_prefix, available_count) in enumerate(types_summary, start=1):
+            # Type label
+            ttk.Label(scrollable_frame, text=type_prefix).grid(row=i, column=0, padx=5, pady=1, sticky="w")
+            
+            # Available count
+            ttk.Label(scrollable_frame, text=str(available_count)).grid(row=i, column=1, padx=5, pady=1)
+            
+            # Checkbox
+            check_var = tk.BooleanVar(value=False)
+            check = ttk.Checkbutton(scrollable_frame, variable=check_var)
+            check.grid(row=i, column=2, padx=5, pady=1)
+            
+            # Count spinbox
+            count_var = tk.IntVar(value=min(available_count, 1))
+            spin = ttk.Spinbox(scrollable_frame, from_=0, to=available_count, textvariable=count_var, width=6, state="disabled")
+            spin.grid(row=i, column=3, padx=5, pady=1)
+            
+            # Enable/disable spinbox based on checkbox
+            def toggle_spin(s=spin, c=check_var):
+                s.config(state="normal" if c.get() else "disabled")
+            check_var.trace_add("write", lambda *args, s=spin, c=check_var: toggle_spin(s, c))
+            
+            self.type_vars[type_prefix] = (check_var, count_var)
+        
+        canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=5, pady=5)
+        scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+        
+        # Button row
+        btn_frame = ttk.Frame(self.type_mode_frame)
+        btn_frame.pack(fill=tk.X, pady=5)
+        
+        ttk.Button(btn_frame, text="Select All", command=self._select_all_types).pack(side=tk.LEFT, padx=5)
+        ttk.Button(btn_frame, text="Clear", command=self._clear_all_types).pack(side=tk.LEFT, padx=5)
+        
+        # Info label
+        self.type_info_label = ttk.Label(btn_frame, text="Total: 0 households")
+        self.type_info_label.pack(side=tk.LEFT, padx=15)
+        
+        # Update total when selections change
+        def update_total(*args):
+            total = sum(count_var.get() for check_var, count_var in self.type_vars.values() if check_var.get())
+            self.type_info_label.config(text=f"Total: {total} households")
+        
+        for check_var, count_var in self.type_vars.values():
+            check_var.trace_add("write", update_total)
+            count_var.trace_add("write", update_total)
+        
+        # Automatically switch to by_type mode
+        self.selection_mode_var.set("by_type")
+        self._on_selection_mode_change()
+    
+    def _select_all_types(self) -> None:
+        """Select all household types."""
+        for check_var, count_var in self.type_vars.values():
+            check_var.set(True)
+    
+    def _clear_all_types(self) -> None:
+        """Clear all household type selections."""
+        for check_var, count_var in self.type_vars.values():
+            check_var.set(False)
+    
     def _create_data_tab(self) -> None:
         """Create data loading widgets."""
         # Household data section
@@ -345,6 +517,9 @@ class SimulationGUI(tk.Tk, SimulationObserver):
         
         self.hh_status = ttk.Label(self.data_frame, text="Not loaded")
         self.hh_status.pack(anchor=tk.W, padx=15)
+        
+        ttk.Label(self.data_frame, text="💡 Tip: Go to Parameters tab to select specific household types",
+                 font=("TkDefaultFont", 9, "italic"), foreground="blue").pack(anchor=tk.W, padx=15, pady=5)
         
         # Grid capacity section
         gc_frame = ttk.LabelFrame(self.data_frame, text="Grid Capacity Data (Optional)", padding=10)
@@ -466,7 +641,20 @@ class SimulationGUI(tk.Tk, SimulationObserver):
             self.params.simulation_steps = self.param_vars["simulation_steps"].get()
             self.params.time_step_hours = self.param_vars["time_step_hours"].get()
             
-            self.params.household.max_households = self.param_vars["max_households"].get()
+            # Apply household selection based on mode
+            if self.selection_mode_var.get() == "by_type" and self.type_vars:
+                # Type-based selection
+                type_selection = {}
+                for type_prefix, (check_var, count_var) in self.type_vars.items():
+                    if check_var.get() and count_var.get() > 0:
+                        type_selection[type_prefix] = count_var.get()
+                self.params.household.type_selection = type_selection
+                self.params.household.random_type_selection = True
+            else:
+                # Simple selection - clear type_selection to use max_households
+                self.params.household.type_selection = {}
+                self.params.household.max_households = self.param_vars["max_households"].get()
+            
             self.params.household.shared_battery_probability = self.param_vars["shared_battery_probability"].get()
             self.params.household.initial_wallet = self.param_vars["initial_wallet"].get()
             
@@ -583,8 +771,9 @@ class SimulationGUI(tk.Tk, SimulationObserver):
             
             n_households = self.household_data['id'].nunique() if 'id' in self.household_data.columns else 'unknown'
             n_rows = len(self.household_data)
-            self.hh_status.config(text=f"✓ Loaded: {n_households} households, {n_rows} rows")
+            self.hh_status.config(text=f"✓ Loaded: {n_households} households, {n_rows} rows. Go to Parameters tab to select types.")
             self.status_var.set(f"Household data loaded from {path}")
+            
         except Exception as e:
             self.hh_status.config(text=f"✗ Error: {e}")
             messagebox.showerror("Error", f"Failed to load household data: {e}")
@@ -745,7 +934,7 @@ class SimulationGUI(tk.Tk, SimulationObserver):
             self._update_text_viz()
     
     def _update_matplotlib_viz(self) -> None:
-        """Update the 2-plot visualization."""
+        """Update the 2-plot visualization with optimized rendering."""
         baseline_df = self.data_collector.get_aggregated_by_step("baseline")
         optimized_df = self.data_collector.get_aggregated_by_step("optimized")
         
@@ -753,41 +942,45 @@ class SimulationGUI(tk.Tk, SimulationObserver):
         self.ax_grid.clear()
         
         if baseline_df.empty and optimized_df.empty:
-            self.canvas.draw()
+            self.canvas.draw_idle()  # Use draw_idle for better performance
             return
         
         # Colors
         baseline_color = "#e74c3c"  # Red
         optimized_color = "#27ae60"  # Green
         
-        # Plot 1: Wallet
+        # Plot 1: Wallet - use rasterized for faster rendering
         self.ax_wallet.set_title("Total Wallet ($)", fontsize=10, fontweight='bold')
         if not baseline_df.empty:
             self.ax_wallet.plot(baseline_df["step"], baseline_df["wallet"], 
-                               color=baseline_color, label="Baseline", linewidth=1.5)
+                               color=baseline_color, label="Baseline", linewidth=1.5, 
+                               rasterized=True, antialiased=True)
         if not optimized_df.empty:
             self.ax_wallet.plot(optimized_df["step"], optimized_df["wallet"],
-                               color=optimized_color, label="Optimized", linewidth=1.5)
+                               color=optimized_color, label="Optimized", linewidth=1.5,
+                               rasterized=True, antialiased=True)
         self.ax_wallet.set_xlabel("Step")
         self.ax_wallet.set_ylabel("Wallet ($)")
         self.ax_wallet.legend(fontsize=8)
         self.ax_wallet.grid(True, alpha=0.3)
         
-        # Plot 2: Grid Buy
+        # Plot 2: Grid Buy - use rasterized for faster rendering
         self.ax_grid.set_title("Grid Energy Purchase (kWh)", fontsize=10, fontweight='bold')
         if not baseline_df.empty:
             self.ax_grid.plot(baseline_df["step"], baseline_df["grid_buy"],
-                             color=baseline_color, label="Baseline", linewidth=1.5)
+                             color=baseline_color, label="Baseline", linewidth=1.5,
+                             rasterized=True, antialiased=True)
         if not optimized_df.empty:
             self.ax_grid.plot(optimized_df["step"], optimized_df["grid_buy"],
-                             color=optimized_color, label="Optimized", linewidth=1.5)
+                             color=optimized_color, label="Optimized", linewidth=1.5,
+                             rasterized=True, antialiased=True)
         self.ax_grid.set_xlabel("Step")
         self.ax_grid.set_ylabel("Grid Buy (kWh)")
         self.ax_grid.legend(fontsize=8)
         self.ax_grid.grid(True, alpha=0.3)
         
         self.fig.tight_layout(pad=2.0)
-        self.canvas.draw()
+        self.canvas.draw_idle()  # Use draw_idle for better performance
     
     def _update_text_viz(self) -> None:
         """Update text-based visualization."""

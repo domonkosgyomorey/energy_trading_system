@@ -1,0 +1,65 @@
+{
+  "paths": {
+    "household_db_dir": "household_dbs",
+    "household_db_file": "merged2024.parquet",
+    "grid_capacity_file": "",
+    "output_dir": "results"
+  },
+  "battery": {
+    "simple_capacity_kwh": 350.0,
+    "simple_charge_efficiency": 0.9,
+    "simple_discharge_efficiency": 0.9,
+    "simple_initial_charge_kwh": 3.0,
+    "central_capacity_kwh": 10000.0,
+    "central_charge_efficiency": 0.95,
+    "central_discharge_efficiency": 0.95,
+    "central_tax_per_kwh": 0.02
+  },
+  "grid_price": {
+    "min_buy_price": 0.12,
+    "max_buy_price": 0.35,
+    "min_sell_price": 0.03,
+    "max_sell_price": 0.1
+  },
+  "grid_capacity": {
+    "use_capacity_limits": true,
+    "default_import_capacity_kw": 10000.0,
+    "default_export_capacity_kw": 1000.0,
+    "peak_reduction_factor": 0.6,
+    "noise_std": 0.05
+  },
+  "forecaster": {
+    "history_size": 10,
+    "prediction_size": 5,
+    "city_grid_price_prediction_size": 5
+  },
+  "household": {
+    "max_households": 5,
+    "shared_battery_probability": 0.2,
+    "production_scale_factor": 0.65,
+    "initial_wallet": 100.0,
+    "type_selection": {
+      "ik": 5,
+      "ir": 2,
+      "is": 2,
+      "ta": 1
+    },
+    "random_type_selection": true
+  },
+  "optimizer": {
+    "optimizer_type": "greedy",
+    "battery_charge_rate_factor": 0.5,
+    "wallet_penalty_weight": 1000.0,
+    "p2p_transaction_cost": 0.25,
+    "min_trade_threshold": 0.5,
+    "solver": "CLARABEL",
+    "warm_start": true,
+    "max_neighbors": 5,
+    "p2p_price_factor": 0.8,
+    "battery_target_pct": 0.5,
+    "smart_battery_strategy": true,
+    "prefer_p2p_over_grid": true
+  },
+  "simulation_steps": 90,
+  "time_step_hours": 24.0
+}

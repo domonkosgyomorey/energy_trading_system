@@ -70,6 +70,9 @@ class HouseholdParams:
     shared_battery_probability: float = 0.2  # Probability household uses shared battery
     production_scale_factor: float = 0.65    # Scale factor for production data
     initial_wallet: float = 100.0  # Start with $100 credit (realistic prepaid energy account)
+    # Household type selection (e.g., {"kh": 3, "ik": 2} means 3 from kh-type, 2 from ik-type)
+    type_selection: dict[str, int] = field(default_factory=dict)
+    random_type_selection: bool = True  # Randomly select from each type (vs taking first N)
 
 
 @dataclass
@@ -77,7 +80,7 @@ class OptimizerParams:
     """Parameters for the optimizer."""
     optimizer_type: str = "greedy"           # "convex" or "greedy" - greedy is faster but less optimal
     battery_charge_rate_factor: float = 0.5  # Max charge rate: 50% of capacity per hour (Powerwall: ~7kW for 13.5kWh)
-    wallet_penalty_weight: float = 1000.0    # Strong penalty for debt (realistic credit constraint)
+    wallet_penalty_weight: float = 100.0     # Penalty for debt (too high can cause infeasibility)
     p2p_transaction_cost: float = 0.25       # $0.25 per transaction (realistic blockchain/platform fee)
     min_trade_threshold: float = 0.5         # Minimum 0.5 kWh per trade (avoid micro-transactions)
     solver: str = "CLARABEL"                 # Solver: CLARABEL (fast), ECOS, OSQP, SCS (slow but robust)
@@ -85,6 +88,8 @@ class OptimizerParams:
     max_neighbors: int | None = 5            # Max neighbors each household can trade with (None = all)
     p2p_price_factor: float = 0.80           # P2P price = 80% of grid buy price (20% savings incentive)
     battery_target_pct: float = 0.50         # Target battery level for greedy optimizer (0-1)
+    smart_battery_strategy: bool = True      # Use lookahead to optimize battery (greedy only)
+    prefer_p2p_over_grid: bool = True        # Prioritize P2P trades over grid (greedy only)
 
 
 @dataclass
