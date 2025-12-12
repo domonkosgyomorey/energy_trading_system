@@ -1,14 +1,18 @@
 from simulation.city_grid_price_forecaster.city_gird_price_forecaster import CityGridPriceForecaster
+from simulation.params import GridPriceParams
 from typing import Literal
 import numpy as np
 
+
 class SimpleCityGridPriceForecaster(CityGridPriceForecaster):
-    def __init__(self):
+    def __init__(self, price_params: GridPriceParams | None = None):
         super().__init__()
-        self._min_sell: float = 0.01
-        self._max_sell: float = 15
-        self._min_buy: float = 9
-        self._max_buy: float = 50
+
+        params = price_params or GridPriceParams()
+        self._min_sell: float = params.min_sell_price
+        self._max_sell: float = params.max_sell_price
+        self._min_buy: float = params.min_buy_price
+        self._max_buy: float = params.max_buy_price
 
     def forecast(self, price_history: list[float], forecast_size: int) -> dict[Literal["sell", "buy"], list[float]]:
         buy_prices: list[float] = [np.random.uniform(self._min_buy, self._max_buy) for _ in range(forecast_size)]

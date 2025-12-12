@@ -26,6 +26,55 @@ except ImportError:
     HAS_MATPLOTLIB = False
 
 
+class CollapsibleFrame(ttk.Frame):
+    """A frame that can be collapsed/expanded with a toggle button."""
+    
+    def __init__(self, parent, title: str, expanded: bool = True, **kwargs):
+        super().__init__(parent, **kwargs)
+        
+        self.expanded = tk.BooleanVar(value=expanded)
+        self.title = title
+        
+        # Header frame with toggle button
+        self.header_frame = ttk.Frame(self)
+        self.header_frame.pack(fill=tk.X, pady=(5, 0))
+        
+        # Toggle button with arrow indicator
+        self.toggle_btn = ttk.Button(
+            self.header_frame, 
+            text=self._get_toggle_text(),
+            command=self._toggle,
+            width=30
+        )
+        self.toggle_btn.pack(side=tk.LEFT, fill=tk.X, expand=True)
+        
+        # Content frame (collapsible)
+        self.content_frame = ttk.Frame(self, padding=(15, 5, 5, 5))
+        if expanded:
+            self.content_frame.pack(fill=tk.BOTH, expand=True)
+        
+        # Separator at bottom
+        self.separator = ttk.Separator(self, orient=tk.HORIZONTAL)
+        self.separator.pack(fill=tk.X, pady=(5, 0))
+    
+    def _get_toggle_text(self) -> str:
+        arrow = "▼" if self.expanded.get() else "▶"
+        return f"{arrow}  {self.title}"
+    
+    def _toggle(self):
+        self.expanded.set(not self.expanded.get())
+        self.toggle_btn.config(text=self._get_toggle_text())
+        
+        if self.expanded.get():
+            self.content_frame.pack(fill=tk.BOTH, expand=True, after=self.header_frame)
+        else:
+            self.content_frame.pack_forget()
+    
+    def get_content_frame(self) -> ttk.Frame:
+        """Return the content frame to add widgets to."""
+        return self.content_frame
+
+
 class SimulationGUI(tk.Tk, SimulationObserver):
     """Main GUI application window."""
     
@@ -75,7 +124,7 @@ class SimulationGUI(tk.Tk, SimulationObserver):
         self.status_bar = ttk.Label(self, textvariable=self.status_var, relief=tk.SUNKEN, anchor=tk.W)
         
     def _create_params_tab(self) -> None:
-        """Create parameter configuration widgets."""
+        """Create parameter configuration widgets with collapsible sections."""
         # Scrollable frame for parameters
         canvas = tk.Canvas(self.params_frame)
         scrollbar = ttk.Scrollbar(self.params_frame, orient="vertical", command=canvas.yview)
@@ -85,101 +134,128 @@ class SimulationGUI(tk.Tk, SimulationObserver):
         canvas.create_window((0, 0), window=self.params_inner, anchor="nw")
         canvas.configure(yscrollcommand=scrollbar.set)
         
+        # Enable mouse wheel scrolling
+        def _on_mousewheel(event):
+            canvas.yview_scroll(int(-1*(event.delta/120)), "units")
+        canvas.bind_all("<MouseWheel>", _on_mousewheel)
+        
         canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
         scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
         
         # Parameter entry variables
         self.param_vars: dict[str, tk.Variable] = {}
         
-        row = 0
+        # === Simulation Section (expanded by default) ===
+        sim_section = CollapsibleFrame(self.params_inner, "⏱️ Simulation", expanded=True)
+        sim_section.pack(fill=tk.X, pady=2)
+        sim_content = sim_section.get_content_frame()
         
-        # Simulation section
-        row = self._add_section_header(self.params_inner, "Simulation", row)
-        row = self._add_param_entry(self.params_inner, "simulation_steps", "Simulation Steps", self.params.simulation_steps, row,
+        self._add_param_row(sim_content, "simulation_steps", "Simulation Steps", self.params.simulation_steps, 0,
             "Total number of time steps to simulate. Each step represents one time_step_hours period.")
-        row = self._add_param_entry(self.params_inner, "time_step_hours", "Time Step (hours)", self.params.time_step_hours, row,
+        self._add_param_row(sim_content, "time_step_hours", "Time Step (hours)", self.params.time_step_hours, 1,
             "Duration of each simulation step in hours. E.g., 24 = daily resolution, 1 = hourly resolution.")
         
-        # Household section
-        row = self._add_section_header(self.params_inner, "Household", row)
-        row = self._add_param_entry(self.params_inner, "max_households", "Max Households", self.params.household.max_households, row,
+        # === Household Section ===
+        hh_section = CollapsibleFrame(self.params_inner, "🏠 Household", expanded=True)
+        hh_section.pack(fill=tk.X, pady=2)
+        hh_content = hh_section.get_content_frame()
+        
+        self._add_param_row(hh_content, "max_households", "Max Households", self.params.household.max_households, 0,
             "Maximum number of households to include in the simulation. More households = longer computation time.")
-        row = self._add_param_entry(self.params_inner, "shared_battery_probability", "Shared Battery Prob", self.params.household.shared_battery_probability, row,
+        self._add_param_row(hh_content, "shared_battery_probability", "Shared Battery Prob", self.params.household.shared_battery_probability, 1,
             "Probability (0-1) that a household uses the shared central battery instead of having its own battery.")
-        row = self._add_param_entry(self.params_inner, "initial_wallet", "Initial Wallet ($)", self.params.household.initial_wallet, row,
+        self._add_param_row(hh_content, "initial_wallet", "Initial Wallet ($)", self.params.household.initial_wallet, 2,
             "Starting wallet balance for each household. Negative values are allowed.")
         
-        # Battery section
-        row = self._add_section_header(self.params_inner, "Battery", row)
-        row = self._add_param_entry(self.params_inner, "simple_capacity_kwh", "Simple Capacity (kWh)", self.params.battery.simple_capacity_kwh, row,
+        # === Battery Section ===
+        bat_section = CollapsibleFrame(self.params_inner, "🔋 Battery", expanded=False)
+        bat_section.pack(fill=tk.X, pady=2)
+        bat_content = bat_section.get_content_frame()
+        
+        self._add_param_row(bat_content, "simple_capacity_kwh", "Simple Capacity (kWh)", self.params.battery.simple_capacity_kwh, 0,
             "Energy storage capacity for individual household batteries in kilowatt-hours.")
-        row = self._add_param_entry(self.params_inner, "central_capacity_kwh", "Central Capacity (kWh)", self.params.battery.central_capacity_kwh, row,
+        self._add_param_row(bat_content, "central_capacity_kwh", "Central Capacity (kWh)", self.params.battery.central_capacity_kwh, 1,
             "Energy storage capacity for the shared community central battery in kilowatt-hours.")
-        row = self._add_param_entry(self.params_inner, "simple_charge_efficiency", "Charge Efficiency", self.params.battery.simple_charge_efficiency, row,
+        self._add_param_row(bat_content, "simple_charge_efficiency", "Charge Efficiency", self.params.battery.simple_charge_efficiency, 2,
             "Battery charging efficiency (0-1). A value of 0.9 means 10% energy loss when charging.")
-        row = self._add_param_entry(self.params_inner, "simple_discharge_efficiency", "Discharge Efficiency", self.params.battery.simple_discharge_efficiency, row,
+        self._add_param_row(bat_content, "simple_discharge_efficiency", "Discharge Efficiency", self.params.battery.simple_discharge_efficiency, 3,
             "Battery discharging efficiency (0-1). A value of 0.9 means 10% energy loss when discharging.")
         
-        # Grid Price section
-        row = self._add_section_header(self.params_inner, "Grid Prices", row)
-        row = self._add_param_entry(self.params_inner, "min_buy_price", "Min Buy Price ($/kWh)", self.params.grid_price.min_buy_price, row,
+        # === Grid Price Section ===
+        price_section = CollapsibleFrame(self.params_inner, "💲 Grid Prices", expanded=False)
+        price_section.pack(fill=tk.X, pady=2)
+        price_content = price_section.get_content_frame()
+        
+        self._add_param_row(price_content, "min_buy_price", "Min Buy Price ($/kWh)", self.params.grid_price.min_buy_price, 0,
             "Minimum price to buy energy from the city grid. Prices vary based on supply/demand.")
-        row = self._add_param_entry(self.params_inner, "max_buy_price", "Max Buy Price ($/kWh)", self.params.grid_price.max_buy_price, row,
+        self._add_param_row(price_content, "max_buy_price", "Max Buy Price ($/kWh)", self.params.grid_price.max_buy_price, 1,
             "Maximum price to buy energy from the city grid during peak demand periods.")
-        row = self._add_param_entry(self.params_inner, "min_sell_price", "Min Sell Price ($/kWh)", self.params.grid_price.min_sell_price, row,
+        self._add_param_row(price_content, "min_sell_price", "Min Sell Price ($/kWh)", self.params.grid_price.min_sell_price, 2,
             "Minimum price when selling excess energy back to the city grid.")
-        row = self._add_param_entry(self.params_inner, "max_sell_price", "Max Sell Price ($/kWh)", self.params.grid_price.max_sell_price, row,
+        self._add_param_row(price_content, "max_sell_price", "Max Sell Price ($/kWh)", self.params.grid_price.max_sell_price, 3,
             "Maximum price when selling excess energy back to the city grid during high demand.")
         
-        # Grid Capacity section
-        row = self._add_section_header(self.params_inner, "Grid Capacity", row)
-        row = self._add_checkbox_entry(self.params_inner, "use_capacity_limits", "Enable Capacity Limits", self.params.grid_capacity.use_capacity_limits, row,
+        # === Grid Capacity Section ===
+        cap_section = CollapsibleFrame(self.params_inner, "⚡ Grid Capacity", expanded=False)
+        cap_section.pack(fill=tk.X, pady=2)
+        cap_content = cap_section.get_content_frame()
+        
+        self._add_checkbox_row(cap_content, "use_capacity_limits", "Enable Capacity Limits", self.params.grid_capacity.use_capacity_limits, 0,
             "When enabled, limits how much energy the community can import/export from the city grid at once.")
-        row = self._add_param_entry(self.params_inner, "default_import_capacity_kw", "Default Import (kW)", self.params.grid_capacity.default_import_capacity_kw, row,
+        self._add_param_row(cap_content, "default_import_capacity_kw", "Default Import (kW)", self.params.grid_capacity.default_import_capacity_kw, 1,
             "Maximum power (kW) that can be imported from the city grid at any time step.")
-        row = self._add_param_entry(self.params_inner, "default_export_capacity_kw", "Default Export (kW)", self.params.grid_capacity.default_export_capacity_kw, row,
+        self._add_param_row(cap_content, "default_export_capacity_kw", "Default Export (kW)", self.params.grid_capacity.default_export_capacity_kw, 2,
             "Maximum power (kW) that can be exported to the city grid at any time step.")
         
-        # Forecaster section
-        row = self._add_section_header(self.params_inner, "Forecaster", row)
-        row = self._add_param_entry(self.params_inner, "history_size", "History Size", self.params.forecaster.history_size, row,
+        # === Forecaster Section ===
+        fore_section = CollapsibleFrame(self.params_inner, "🔮 Forecaster", expanded=False)
+        fore_section.pack(fill=tk.X, pady=2)
+        fore_content = fore_section.get_content_frame()
+        
+        self._add_param_row(fore_content, "history_size", "History Size", self.params.forecaster.history_size, 0,
             "Number of past time steps the forecaster uses to predict future values.")
-        row = self._add_param_entry(self.params_inner, "prediction_size", "Prediction Size", self.params.forecaster.prediction_size, row,
+        self._add_param_row(fore_content, "prediction_size", "Prediction Size", self.params.forecaster.prediction_size, 1,
             "Number of future time steps the optimizer looks ahead when planning trades. Lower = faster but less optimal.")
         
-        # Optimizer section
-        row = self._add_section_header(self.params_inner, "Optimizer", row)
-        row = self._add_param_entry(self.params_inner, "p2p_transaction_cost", "P2P Transaction Cost ($)", self.params.optimizer.p2p_transaction_cost, row,
+        # === Optimizer Section (expanded by default since it's important) ===
+        opt_section = CollapsibleFrame(self.params_inner, "🧮 Optimizer", expanded=True)
+        opt_section.pack(fill=tk.X, pady=2)
+        opt_content = opt_section.get_content_frame()
+        
+        self._add_combobox_row(opt_content, "optimizer_type", "Optimizer Type", self.params.optimizer.optimizer_type, 
+            ["greedy", "convex"], 0,
+            "Algorithm type. Greedy is MUCH faster (O(N) vs O(N²)) and realistic (no simultaneous buy/sell), but may not find globally optimal solution. Convex uses CVXPY mathematical optimization.")
+        self._add_param_row(opt_content, "p2p_transaction_cost", "P2P Transaction Cost ($)", self.params.optimizer.p2p_transaction_cost, 1,
             "Fixed cost per P2P trade. Higher values discourage small trades, leading to fewer but larger transactions.")
-        row = self._add_param_entry(self.params_inner, "min_trade_threshold", "Min Trade Threshold (kWh)", self.params.optimizer.min_trade_threshold, row,
+        self._add_param_row(opt_content, "min_trade_threshold", "Min Trade Threshold (kWh)", self.params.optimizer.min_trade_threshold, 2,
             "Minimum energy amount for a P2P trade. Trades below this threshold are ignored to reduce noise.")
-        row = self._add_param_entry(self.params_inner, "wallet_penalty_weight", "Wallet Penalty Weight", self.params.optimizer.wallet_penalty_weight, row,
-            "Penalty multiplier for negative wallet balances. Higher values make the optimizer avoid debt more strongly.")
-        row = self._add_combobox_entry(self.params_inner, "solver", "Solver", self.params.optimizer.solver, 
-            ["CLARABEL", "ECOS", "OSQP", "SCS"], row,
-            "Optimization solver. CLARABEL/ECOS are fast, SCS is slower but more robust. Try different solvers if one fails.")
-        row = self._add_checkbox_entry(self.params_inner, "warm_start", "Enable Warm Start", self.params.optimizer.warm_start, row,
-            "Reuse previous solution as starting point. Speeds up consecutive optimizations significantly.")
+        self._add_param_row(opt_content, "wallet_penalty_weight", "Wallet Penalty Weight", self.params.optimizer.wallet_penalty_weight, 3,
+            "Penalty multiplier for negative wallet balances. Higher values make the optimizer avoid debt more strongly. (Convex only)")
+        self._add_combobox_row(opt_content, "solver", "Solver", self.params.optimizer.solver, 
+            ["CLARABEL", "ECOS", "OSQP", "SCS"], 4,
+            "Optimization solver for convex optimizer. CLARABEL/ECOS are fast, SCS is slower but more robust. (Convex only)")
+        self._add_checkbox_row(opt_content, "warm_start", "Enable Warm Start", self.params.optimizer.warm_start, 5,
+            "Reuse previous solution as starting point. Speeds up consecutive optimizations. (Convex only)")
+        self._add_param_row(opt_content, "max_neighbors", "Max P2P Neighbors", self.params.optimizer.max_neighbors or 0, 6,
+            "Maximum neighbors each household can trade with (0 = unlimited). Use 3-5 for large simulations. Households trade in a ring topology.")
+        self._add_param_row(opt_content, "p2p_price_factor", "P2P Price Factor", self.params.optimizer.p2p_price_factor, 7,
+            "P2P price as percentage of grid buy price (0.5-0.95). Lower values make P2P trading more attractive. P2P price dynamically adjusts based on supply/demand.")
+        self._add_param_row(opt_content, "battery_target_pct", "Battery Target (%)", self.params.optimizer.battery_target_pct * 100, 8,
+            "Target battery level for greedy optimizer (0-100%). The optimizer tries to maintain this level. (Greedy only)")
         
-        # Button row
+        # Button row at the bottom
         btn_frame = ttk.Frame(self.params_inner)
-        btn_frame.grid(row=row, column=0, columnspan=3, pady=20)
+        btn_frame.pack(fill=tk.X, pady=20)
         
-        ttk.Button(btn_frame, text="Save Params...", command=self._save_params).pack(side=tk.LEFT, padx=5)
-        ttk.Button(btn_frame, text="Load Params...", command=self._load_params).pack(side=tk.LEFT, padx=5)
-        ttk.Button(btn_frame, text="Reset to Default", command=self._reset_params).pack(side=tk.LEFT, padx=5)
-        ttk.Button(btn_frame, text="Apply Changes", command=self._apply_params).pack(side=tk.LEFT, padx=5)
-        
-    def _add_section_header(self, parent: ttk.Frame, text: str, row: int) -> int:
-        """Add a section header."""
-        ttk.Separator(parent, orient=tk.HORIZONTAL).grid(row=row, column=0, columnspan=3, sticky="ew", pady=(10, 5))
-        ttk.Label(parent, text=text, font=("TkDefaultFont", 10, "bold")).grid(row=row+1, column=0, columnspan=3, sticky="w", pady=(0, 5))
-        return row + 2
+        ttk.Button(btn_frame, text="💾 Save Params...", command=self._save_params).pack(side=tk.LEFT, padx=5)
+        ttk.Button(btn_frame, text="📂 Load Params...", command=self._load_params).pack(side=tk.LEFT, padx=5)
+        ttk.Button(btn_frame, text="🔄 Reset to Default", command=self._reset_params).pack(side=tk.LEFT, padx=5)
+        ttk.Button(btn_frame, text="✅ Apply Changes", command=self._apply_params).pack(side=tk.LEFT, padx=5)
     
-    def _add_param_entry(self, parent: ttk.Frame, key: str, label: str, default: float | int, row: int, tooltip: str = "") -> int:
-        """Add a parameter entry field with optional tooltip."""
+    def _add_param_row(self, parent: ttk.Frame, key: str, label: str, default: float | int, row: int, tooltip: str = "") -> None:
+        """Add a parameter entry row to a collapsible section."""
         lbl = ttk.Label(parent, text=label)
-        lbl.grid(row=row, column=0, sticky="w", padx=5)
+        lbl.grid(row=row, column=0, sticky="w", padx=5, pady=2)
         
         if isinstance(default, int):
             var = tk.IntVar(value=default)
@@ -190,37 +266,31 @@ class SimulationGUI(tk.Tk, SimulationObserver):
         entry = ttk.Entry(parent, textvariable=var, width=15)
         entry.grid(row=row, column=1, padx=5, pady=2)
         
-        # Add tooltip if provided
         if tooltip:
             tooltip_lbl = ttk.Label(parent, text="ⓘ", foreground="blue", cursor="hand2")
             tooltip_lbl.grid(row=row, column=2, padx=2)
             self._create_tooltip(tooltip_lbl, tooltip)
             self._create_tooltip(lbl, tooltip)
             self._create_tooltip(entry, tooltip)
-        
-        return row + 1
     
-    def _add_checkbox_entry(self, parent: ttk.Frame, key: str, label: str, default: bool, row: int, tooltip: str = "") -> int:
-        """Add a checkbox parameter with optional tooltip."""
+    def _add_checkbox_row(self, parent: ttk.Frame, key: str, label: str, default: bool, row: int, tooltip: str = "") -> None:
+        """Add a checkbox row to a collapsible section."""
         var = tk.BooleanVar(value=default)
         self.param_vars[key] = var
         cb = ttk.Checkbutton(parent, text=label, variable=var)
         cb.grid(row=row, column=0, columnspan=2, sticky="w", padx=5, pady=2)
         
-        # Add tooltip if provided
         if tooltip:
             tooltip_lbl = ttk.Label(parent, text="ⓘ", foreground="blue", cursor="hand2")
             tooltip_lbl.grid(row=row, column=2, padx=2)
             self._create_tooltip(tooltip_lbl, tooltip)
             self._create_tooltip(cb, tooltip)
-        
-        return row + 1
     
-    def _add_combobox_entry(self, parent: ttk.Frame, key: str, label: str, default: str, 
-                           options: list[str], row: int, tooltip: str = "") -> int:
-        """Add a combobox (dropdown) parameter with optional tooltip."""
+    def _add_combobox_row(self, parent: ttk.Frame, key: str, label: str, default: str, 
+                          options: list[str], row: int, tooltip: str = "") -> None:
+        """Add a combobox row to a collapsible section."""
         lbl = ttk.Label(parent, text=label)
-        lbl.grid(row=row, column=0, sticky="w", padx=5)
+        lbl.grid(row=row, column=0, sticky="w", padx=5, pady=2)
         
         var = tk.StringVar(value=default)
         self.param_vars[key] = var
@@ -228,15 +298,12 @@ class SimulationGUI(tk.Tk, SimulationObserver):
         combo = ttk.Combobox(parent, textvariable=var, values=options, width=12, state="readonly")
         combo.grid(row=row, column=1, padx=5, pady=2)
         
-        # Add tooltip if provided
         if tooltip:
             tooltip_lbl = ttk.Label(parent, text="ⓘ", foreground="blue", cursor="hand2")
             tooltip_lbl.grid(row=row, column=2, padx=2)
             self._create_tooltip(tooltip_lbl, tooltip)
             self._create_tooltip(lbl, tooltip)
             self._create_tooltip(combo, tooltip)
-        
-        return row + 1
     
     def _create_tooltip(self, widget, text: str) -> None:
         """Create a tooltip for a widget."""
@@ -420,11 +487,16 @@ class SimulationGUI(tk.Tk, SimulationObserver):
             self.params.forecaster.history_size = self.param_vars["history_size"].get()
             self.params.forecaster.prediction_size = self.param_vars["prediction_size"].get()
             
+            self.params.optimizer.optimizer_type = self.param_vars["optimizer_type"].get()
             self.params.optimizer.p2p_transaction_cost = self.param_vars["p2p_transaction_cost"].get()
             self.params.optimizer.min_trade_threshold = self.param_vars["min_trade_threshold"].get()
             self.params.optimizer.wallet_penalty_weight = self.param_vars["wallet_penalty_weight"].get()
             self.params.optimizer.solver = self.param_vars["solver"].get()
             self.params.optimizer.warm_start = self.param_vars["warm_start"].get()
+            max_neighbors_val = self.param_vars["max_neighbors"].get()
+            self.params.optimizer.max_neighbors = None if max_neighbors_val <= 0 else max_neighbors_val
+            self.params.optimizer.p2p_price_factor = self.param_vars["p2p_price_factor"].get()
+            self.params.optimizer.battery_target_pct = self.param_vars["battery_target_pct"].get() / 100.0
             
             self.status_var.set("Parameters applied")
         except Exception as e:
@@ -479,11 +551,15 @@ class SimulationGUI(tk.Tk, SimulationObserver):
         self.param_vars["default_export_capacity_kw"].set(self.params.grid_capacity.default_export_capacity_kw)
         self.param_vars["history_size"].set(self.params.forecaster.history_size)
         self.param_vars["prediction_size"].set(self.params.forecaster.prediction_size)
+        self.param_vars["optimizer_type"].set(self.params.optimizer.optimizer_type)
         self.param_vars["p2p_transaction_cost"].set(self.params.optimizer.p2p_transaction_cost)
         self.param_vars["min_trade_threshold"].set(self.params.optimizer.min_trade_threshold)
         self.param_vars["wallet_penalty_weight"].set(self.params.optimizer.wallet_penalty_weight)
         self.param_vars["solver"].set(self.params.optimizer.solver)
         self.param_vars["warm_start"].set(self.params.optimizer.warm_start)
+        self.param_vars["max_neighbors"].set(self.params.optimizer.max_neighbors or 0)
+        self.param_vars["p2p_price_factor"].set(self.params.optimizer.p2p_price_factor)
+        self.param_vars["battery_target_pct"].set(self.params.optimizer.battery_target_pct * 100)
         
     # --- Data loading ---
     
@@ -542,7 +618,8 @@ class SimulationGUI(tk.Tk, SimulationObserver):
                 steps=steps,
                 base_import_kw=self.gen_import_var.get(),
                 base_export_kw=self.gen_export_var.get(),
-                peak_hour_reduction=self.gen_peak_var.get()
+                peak_hour_reduction=self.gen_peak_var.get(),
+                noise_std=self.params.grid_capacity.noise_std
             )
             self.gc_status.config(text=f"✓ Generated: {steps} timesteps")
             self.status_var.set("Synthetic grid capacity data generated")
@@ -615,7 +692,8 @@ class SimulationGUI(tk.Tk, SimulationObserver):
                 self._auto_save_results()
                 
         except Exception as e:
-            self.after(0, lambda: messagebox.showerror("Simulation Error", str(e)))
+            error_msg = str(e)
+            self.after(0, lambda msg=error_msg: messagebox.showerror("Simulation Error", msg))
         finally:
             self.after(0, self._simulation_finished)
     
@@ -683,7 +761,7 @@ class SimulationGUI(tk.Tk, SimulationObserver):
         optimized_color = "#27ae60"  # Green
         
         # Plot 1: Wallet
-        self.ax_wallet.set_title("💰 Total Wallet", fontsize=10, fontweight='bold')
+        self.ax_wallet.set_title("Total Wallet ($)", fontsize=10, fontweight='bold')
         if not baseline_df.empty:
             self.ax_wallet.plot(baseline_df["step"], baseline_df["wallet"], 
                                color=baseline_color, label="Baseline", linewidth=1.5)
@@ -696,7 +774,7 @@ class SimulationGUI(tk.Tk, SimulationObserver):
         self.ax_wallet.grid(True, alpha=0.3)
         
         # Plot 2: Grid Buy
-        self.ax_grid.set_title("🔌 Grid Energy Purchase", fontsize=10, fontweight='bold')
+        self.ax_grid.set_title("Grid Energy Purchase (kWh)", fontsize=10, fontweight='bold')
         if not baseline_df.empty:
             self.ax_grid.plot(baseline_df["step"], baseline_df["grid_buy"],
                              color=baseline_color, label="Baseline", linewidth=1.5)
@@ -734,12 +812,16 @@ class SimulationGUI(tk.Tk, SimulationObserver):
         self.text_viz.config(state=tk.DISABLED)
     
     def _update_summary(self) -> None:
-        """Update the summary text."""
+        """Update the summary text with detailed per-household metrics."""
         self.summary_text.config(state=tk.NORMAL)
         self.summary_text.delete(1.0, tk.END)
         
         baseline_df = self.data_collector.get_aggregated_by_step("baseline")
         optimized_df = self.data_collector.get_aggregated_by_step("optimized")
+        
+        # Get raw per-household data for detailed analysis
+        baseline_raw = self.data_collector.get_dataframe("baseline")
+        optimized_raw = self.data_collector.get_dataframe("optimized")
         
         if baseline_df.empty and optimized_df.empty:
             self.summary_text.insert(tk.END, "No simulation data available.")
@@ -748,18 +830,19 @@ class SimulationGUI(tk.Tk, SimulationObserver):
         
         summary = ""
         
+        # === COMMUNITY TOTALS ===
         if not baseline_df.empty:
             final_b = baseline_df.iloc[-1]
-            summary += "📊 BASELINE RESULTS:\n"
-            summary += "─" * 35 + "\n"
+            summary += "📊 BASELINE RESULTS (Community Total):\n"
+            summary += "─" * 50 + "\n"
             summary += f"  Final Wallet:     ${final_b['wallet']:.2f}\n"
             summary += f"  Total Grid Buy:   {baseline_df['grid_buy'].sum():.2f} kWh\n"
             summary += f"  Total Grid Sell:  {baseline_df['grid_sell'].sum():.2f} kWh\n\n"
         
         if not optimized_df.empty:
             final_o = optimized_df.iloc[-1]
-            summary += "🚀 OPTIMIZED RESULTS:\n"
-            summary += "─" * 35 + "\n"
+            summary += "🚀 OPTIMIZED RESULTS (Community Total):\n"
+            summary += "─" * 50 + "\n"
             summary += f"  Final Wallet:     ${final_o['wallet']:.2f}\n"
             summary += f"  Total Grid Buy:   {optimized_df['grid_buy'].sum():.2f} kWh\n"
             summary += f"  Total Grid Sell:  {optimized_df['grid_sell'].sum():.2f} kWh\n"
@@ -767,6 +850,7 @@ class SimulationGUI(tk.Tk, SimulationObserver):
                 summary += f"  Total P2P Trade:  {optimized_df['p2p_buy_amount'].sum():.2f} kWh\n"
             summary += "\n"
         
+        # === COMPARISON METRICS ===
         if not baseline_df.empty and not optimized_df.empty:
             final_b = baseline_df.iloc[-1]
             final_o = optimized_df.iloc[-1]
@@ -778,12 +862,95 @@ class SimulationGUI(tk.Tk, SimulationObserver):
             grid_buy_pct = (grid_buy_reduction / baseline_grid_buy * 100) if baseline_grid_buy > 0 else 0
             
             summary += "📈 COMPARISON:\n"
-            summary += "─" * 35 + "\n"
-            summary += f"  Wallet Improvement: ${wallet_diff:+.2f}\n"
-            summary += f"  Grid Buy Reduction: {grid_buy_reduction:.2f} kWh ({grid_buy_pct:.1f}%)\n"
+            summary += "─" * 50 + "\n"
+            summary += f"  💰 Wallet Improvement:  ${wallet_diff:+.2f}\n"
+            summary += f"  ⚡ Grid Buy Reduction:  {grid_buy_reduction:.2f} kWh ({grid_buy_pct:.1f}%)\n"
+            
+            # Green metric - calculate self-sufficiency
+            if not optimized_raw.empty:
+                total_consumption = optimized_raw['consumption'].sum()
+                total_production = optimized_raw['production'].sum()
+                total_grid_buy = optimized_raw['grid_buy'].sum()
+                self_sufficiency = ((total_consumption - total_grid_buy) / total_consumption * 100) if total_consumption > 0 else 0
+                summary += f"  🌱 Self-Sufficiency:    {self_sufficiency:.1f}%\n"
+            summary += "\n"
+        
+        # === PER-HOUSEHOLD BREAKDOWN (Compact Table Format) ===
+        if not baseline_raw.empty and not optimized_raw.empty:
+            summary += "📋 PER-HOUSEHOLD SAVINGS:\n"
+            summary += "─" * 50 + "\n"
+            
+            # Get final wallet per household
+            households = baseline_raw['household_id'].unique()
+            n_households = len(households)
+            
+            # Calculate per-household metrics
+            hh_data = []
+            for hh_id in households:
+                baseline_hh = baseline_raw[baseline_raw['household_id'] == hh_id]
+                optimized_hh = optimized_raw[optimized_raw['household_id'] == hh_id]
+                
+                if baseline_hh.empty or optimized_hh.empty:
+                    continue
+                
+                # Final wallet values
+                b_wallet = baseline_hh['wallet'].iloc[-1] if not baseline_hh.empty else 0
+                o_wallet = optimized_hh['wallet'].iloc[-1] if not optimized_hh.empty else 0
+                savings = o_wallet - b_wallet
+                
+                # Energy metrics
+                b_grid_buy = baseline_hh['grid_buy'].sum()
+                o_grid_buy = optimized_hh['grid_buy'].sum()
+                grid_reduction = b_grid_buy - o_grid_buy
+                
+                # P2P volume
+                p2p_volume = 0
+                if 'p2p_buy_amount' in optimized_hh.columns:
+                    p2p_volume = optimized_hh['p2p_buy_amount'].sum() + optimized_hh.get('p2p_sell_amount', pd.Series([0])).sum()
+                
+                hh_data.append({
+                    'id': str(hh_id)[:8],  # Truncate long IDs
+                    'savings': savings,
+                    'grid_reduction': grid_reduction,
+                    'p2p_volume': p2p_volume,
+                    'final_wallet': o_wallet
+                })
+            
+            if hh_data:
+                # Sort by savings (best first)
+                hh_data.sort(key=lambda x: x['savings'], reverse=True)
+                
+                # Show compact table header
+                summary += f"  {'ID':<10} {'Savings':>10} {'Grid↓':>10} {'P2P':>10} {'Wallet':>10}\n"
+                summary += f"  {'─'*10} {'─'*10} {'─'*10} {'─'*10} {'─'*10}\n"
+                
+                # Show all households (compact format)
+                for hh in hh_data:
+                    savings_str = f"${hh['savings']:+.2f}"
+                    grid_str = f"{hh['grid_reduction']:.1f}kWh"
+                    p2p_str = f"{hh['p2p_volume']:.1f}kWh"
+                    wallet_str = f"${hh['final_wallet']:.2f}"
+                    summary += f"  {hh['id']:<10} {savings_str:>10} {grid_str:>10} {p2p_str:>10} {wallet_str:>10}\n"
+                
+                # Statistics
+                savings_list = [h['savings'] for h in hh_data]
+                summary += f"\n  📊 Statistics:\n"
+                summary += f"     Mean Savings:   ${sum(savings_list)/len(savings_list):+.2f}\n"
+                summary += f"     Best Performer: ${max(savings_list):+.2f}\n"
+                summary += f"     Worst Performer: ${min(savings_list):+.2f}\n"
+                
+                # Equity metric (Gini coefficient approximation)
+                wallets = sorted([h['final_wallet'] for h in hh_data])
+                n = len(wallets)
+                if n > 1:
+                    gini_sum = sum((2*i - n - 1) * wallets[i] for i in range(n))
+                    mean_wallet = sum(wallets) / n
+                    gini = gini_sum / (n * n * mean_wallet) if mean_wallet > 0 else 0
+                    equity_score = (1 - abs(gini)) * 100  # 100% = perfect equality
+                    summary += f"     Equity Score:   {equity_score:.1f}% (higher = more equal)\n"
         
         if self.last_save_path:
-            summary += "\n" + "─" * 35 + "\n"
+            summary += "\n" + "─" * 50 + "\n"
             summary += f"📁 Results saved to:\n   {self.last_save_path}\n"
         
         self.summary_text.insert(tk.END, summary)

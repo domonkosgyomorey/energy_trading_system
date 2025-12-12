@@ -51,9 +51,10 @@ class Block:
         return hashlib.sha256(block_string.encode()).hexdigest()
 
 class Blockchain:
-    def __init__(self):
+    def __init__(self, history_size: int = DEFAULT_HISTORY_SIZE):
         self.chain: list[Block] = [self.create_genesis_block()]
         self.households: dict[str, HouseholdData] = {}
+        self.history_size: int = history_size
         
     def create_genesis_block(self) -> Block:
         return Block(0, time.time(), "Genesis Block", "0")
@@ -68,7 +69,7 @@ class Blockchain:
 
     def add_household_data(self, id: str, production: float, consumption: float, wallet: float, stored_kwh: float) -> None:
         if self.households.get(id) is None:
-            self.households[id] = HouseholdData(id=id)
+            self.households[id] = HouseholdData(id=id, history_size=self.history_size)
         
         self.households[id].production.append(production)
         self.households[id].consumption.append(consumption)
@@ -86,28 +87,48 @@ class Blockchain:
 
     def trade_event(self, local_energy_price: float, city_buy_price: float, city_sell_price: float) -> None:
         trading_strs: list[str] = []
+        
+        # First pass: calculate how much each household sold to others
+        p2p_sold_amounts = {hh_id: 0.0 for hh_id in self.households.keys()}
+        
+        for address, household in self.households.items():
+            if household.trades is None:
+                continue
+            # trades_from contains all P2P purchases (this household is the buyer)
+            for trade in household.trades.trades_from:
+                seller_id = trade["seller"]
+                amount = trade["amount"]
+                # Track how much the seller sold
+                p2p_sold_amounts[seller_id] += amount
 
+        # Second pass: execute all trades and update wallets/tokens
         for address, household in self.households.items():
             if household.trades is None:
                 continue
 
-            # --- Execute P2P trading ---
-            p2p_total_sold = 0
+            # --- Execute P2P purchases (this household is the buyer) ---
+            p2p_total_bought = 0
             for trade in household.trades.trades_from:
                 seller = self.households[trade["seller"]]
                 amount = trade["amount"]
 
+                # Seller loses energy, gains money
                 seller.token -= amount
                 seller.wallet += amount * local_energy_price
 
+                # Buyer gains energy, loses money
                 household.token += amount
                 household.wallet -= amount * local_energy_price
 
-                p2p_total_sold += amount
+                p2p_total_bought += amount
 
-            # --- Net production (gross - p2p sold) ---
-            net_production = household.production[-1] - p2p_total_sold
-            household.token += net_production
+            # --- Add production ---
+            # Production is added, but we need to subtract what we sold to others
+            household.token += household.production[-1]
+            
+            # --- Subtract P2P sales (energy sold to others) ---
+            p2p_total_sold = p2p_sold_amounts[address]
+            household.token -= p2p_total_sold
 
             # --- Purchase from city ---
             household.token += household.trades.amount_from_city

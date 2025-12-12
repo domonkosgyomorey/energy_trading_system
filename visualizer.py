@@ -6,6 +6,7 @@ circular network layout, and detailed tooltips including P2P trading information
 import tkinter as tk
 from tkinter import ttk, filedialog, messagebox
 import pandas as pd
+import numpy as np
 import math
 from pathlib import Path
 from dataclasses import dataclass
@@ -18,6 +19,7 @@ try:
     from matplotlib.figure import Figure
     from matplotlib.lines import Line2D
     from matplotlib.patches import Patch
+    import matplotlib.pyplot as plt
     HAS_MATPLOTLIB = True
 except ImportError:
     HAS_MATPLOTLIB = False
@@ -109,10 +111,10 @@ class CIPlotPanel(ttk.Frame):
     
     def __init__(self, parent, config: PlotConfig):
         super().__init__(parent)
-        self.config = config
+        self.plot_config = config
         
         self.fig = Figure(figsize=(5, 3), dpi=85)
-        self.fig.set_tight_layout(True)
+        self.fig.tight_layout()
         self.ax = self.fig.add_subplot(111)
         
         self._setup_plot()
@@ -123,16 +125,16 @@ class CIPlotPanel(ttk.Frame):
     
     def _setup_plot(self):
         """Initialize plot appearance."""
-        self.ax.set_title(self.config.title, fontsize=10, fontweight='bold')
+        self.ax.set_title(self.plot_config.title, fontsize=10, fontweight='bold')
         self.ax.set_xlabel("Step", fontsize=9)
-        self.ax.set_ylabel(self.config.ylabel, fontsize=9)
+        self.ax.set_ylabel(self.plot_config.ylabel, fontsize=9)
         self.ax.tick_params(labelsize=8)
         self.ax.grid(True, alpha=0.3)
     
     def update_data(self, baseline_agg: pd.DataFrame, optimized_agg: pd.DataFrame,
                    baseline_stats: pd.DataFrame, optimized_stats: pd.DataFrame):
         """Update plot with new data including confidence intervals."""
-        if not self.config.enabled:
+        if not self.plot_config.enabled:
             return
         
         self.ax.clear()
@@ -141,7 +143,7 @@ class CIPlotPanel(ttk.Frame):
         baseline_color = "#e74c3c"
         optimized_color = "#27ae60"
         
-        for col, color, label in zip(self.config.columns, self.config.colors, self.config.labels):
+        for col, color, label in zip(self.plot_config.columns, self.plot_config.colors, self.plot_config.labels):
             # Plot baseline with CI
             if not baseline_stats.empty:
                 mean_col = f"{col}_mean"
@@ -161,7 +163,7 @@ class CIPlotPanel(ttk.Frame):
                             linestyle='--', alpha=0.8, label=f"{label} (Baseline)")
                 
                 # Confidence interval
-                if self.config.show_ci and std_col in baseline_stats.columns:
+                if self.plot_config.show_ci and std_col in baseline_stats.columns:
                     std_data = baseline_stats[std_col].fillna(0)
                     # Scale std by household count for sum metrics
                     if sum_col in baseline_stats.columns and mean_col in baseline_stats.columns:
@@ -191,7 +193,7 @@ class CIPlotPanel(ttk.Frame):
                 self.ax.plot(x_data, y_data, color=optimized_color, linewidth=2,
                             label=f"{label} (Optimized)")
                 
-                if self.config.show_ci and std_col in optimized_stats.columns:
+                if self.plot_config.show_ci and std_col in optimized_stats.columns:
                     std_data = optimized_stats[std_col].fillna(0)
                     if sum_col in optimized_stats.columns and mean_col in optimized_stats.columns:
                         mean_data = optimized_stats[mean_col]
@@ -207,7 +209,7 @@ class CIPlotPanel(ttk.Frame):
         self.canvas.draw_idle()
     
     def set_enabled(self, enabled: bool):
-        self.config.enabled = enabled
+        self.plot_config.enabled = enabled
 
 
 class CircularNetworkPanel(ttk.Frame):
@@ -739,9 +741,17 @@ class VisualizerApp(tk.Tk):
         self.step_label = ttk.Label(ctrl_frame, text="0 / 0", width=12)
         self.step_label.pack(side=tk.LEFT, padx=5)
         
+        # Main notebook for tabs
+        self.main_notebook = ttk.Notebook(self)
+        self.main_notebook.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
+        
+        # === Tab 1: Playback View ===
+        playback_frame = ttk.Frame(self.main_notebook)
+        self.main_notebook.add(playback_frame, text="📺 Playback")
+        
         # Main content - horizontal paned window
-        main_paned = ttk.PanedWindow(self, orient=tk.HORIZONTAL)
-        main_paned.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
+        main_paned = ttk.PanedWindow(playback_frame, orient=tk.HORIZONTAL)
+        main_paned.pack(fill=tk.BOTH, expand=True)
         
         # Left: Plot toggles
         left_frame = ttk.LabelFrame(main_paned, text="📊 Plots", padding=5)
@@ -767,15 +777,328 @@ class VisualizerApp(tk.Tk):
         # Right: Network view
         right_frame = ttk.LabelFrame(main_paned, text="🔗 Network View", padding=5)
         main_paned.add(right_frame, weight=2)
-        
         self.network_panel = CircularNetworkPanel(right_frame)
         self.network_panel.pack(fill=tk.BOTH, expand=True)
         self.network_panel.set_view_change_callback(self._update_display)
+        
+        # === Tab 2: Analysis & Comparison ===
+        analysis_frame = ttk.Frame(self.main_notebook)
+        self.main_notebook.add(analysis_frame, text="📊 Analysis")
+        self._create_analysis_tab(analysis_frame)
+        
+        # === Tab 3: Per-Household Metrics ===
+        household_frame = ttk.Frame(self.main_notebook)
+        self.main_notebook.add(household_frame, text="🏠 Households")
+        self._create_household_tab(household_frame)
         
         # Status bar
         self.status_var = tk.StringVar(value="Load simulation files to begin")
         status_bar = ttk.Label(self, textvariable=self.status_var, relief=tk.SUNKEN, padding=3)
         status_bar.pack(fill=tk.X, side=tk.BOTTOM)
+    
+    def _create_analysis_tab(self, parent: ttk.Frame) -> None:
+        """Create the analysis/comparison tab with bar charts and metrics."""
+        # Two-column layout
+        left_frame = ttk.Frame(parent)
+        left_frame.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=5, pady=5)
+        
+        right_frame = ttk.Frame(parent)
+        right_frame.pack(side=tk.RIGHT, fill=tk.BOTH, expand=True, padx=5, pady=5)
+        
+        # Left: Bar chart comparison
+        if HAS_MATPLOTLIB:
+            chart_frame = ttk.LabelFrame(left_frame, text="📊 Baseline vs Optimized Comparison", padding=5)
+            chart_frame.pack(fill=tk.BOTH, expand=True)
+            
+            self.comparison_fig = Figure(figsize=(8, 6), dpi=90)
+            self.comparison_canvas = FigureCanvasTkAgg(self.comparison_fig, master=chart_frame)
+            self.comparison_canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True)
+        
+        # Right: Key metrics and summary
+        metrics_frame = ttk.LabelFrame(right_frame, text="📈 Key Performance Indicators", padding=10)
+        metrics_frame.pack(fill=tk.BOTH, expand=True)
+        
+        self.metrics_text = tk.Text(metrics_frame, height=30, state=tk.DISABLED, 
+                                    font=("Consolas", 10), wrap=tk.WORD)
+        self.metrics_text.pack(fill=tk.BOTH, expand=True)
+        
+        # Refresh button
+        ttk.Button(right_frame, text="🔄 Refresh Analysis", 
+                  command=self._update_analysis_tab).pack(pady=10)
+    
+    def _create_household_tab(self, parent: ttk.Frame) -> None:
+        """Create the per-household comparison tab."""
+        # Top: Charts showing per-household data
+        charts_frame = ttk.Frame(parent)
+        charts_frame.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
+        
+        if HAS_MATPLOTLIB:
+            # Create figure with subplots
+            self.household_fig = Figure(figsize=(14, 8), dpi=90)
+            self.household_canvas = FigureCanvasTkAgg(self.household_fig, master=charts_frame)
+            self.household_canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True)
+        
+        # Bottom: Refresh button and info
+        bottom_frame = ttk.Frame(parent)
+        bottom_frame.pack(fill=tk.X, padx=5, pady=5)
+        
+        ttk.Button(bottom_frame, text="🔄 Refresh Household Data", 
+                  command=self._update_household_tab).pack(side=tk.LEFT, padx=5)
+        
+        self.household_info_label = ttk.Label(bottom_frame, text="Load simulation data to see per-household analysis")
+        self.household_info_label.pack(side=tk.LEFT, padx=10)
+    
+    def _update_analysis_tab(self) -> None:
+        """Update the analysis tab with comparison charts and metrics."""
+        if self.player is None:
+            return
+        
+        # Update bar chart
+        if HAS_MATPLOTLIB:
+            self.comparison_fig.clear()
+            
+            # Create subplots
+            ax1 = self.comparison_fig.add_subplot(2, 2, 1)
+            ax2 = self.comparison_fig.add_subplot(2, 2, 2)
+            ax3 = self.comparison_fig.add_subplot(2, 2, 3)
+            ax4 = self.comparison_fig.add_subplot(2, 2, 4)
+            
+            baseline_df = self.player.baseline_df
+            optimized_df = self.player.optimized_df
+            
+            if not baseline_df.empty and not optimized_df.empty:
+                # Get final values
+                b_final = baseline_df.groupby('household_id').last()
+                o_final = optimized_df.groupby('household_id').last()
+                
+                # 1. Final wallet comparison
+                x = range(len(b_final))
+                width = 0.35
+                ax1.bar([i - width/2 for i in x], b_final['wallet'].values, width, label='Baseline', color='#e74c3c', alpha=0.8)
+                ax1.bar([i + width/2 for i in x], o_final['wallet'].values, width, label='Optimized', color='#27ae60', alpha=0.8)
+                ax1.set_xlabel('Household')
+                ax1.set_ylabel('Final Wallet ($)')
+                ax1.set_title('💰 Final Wallet by Household')
+                ax1.legend()
+                ax1.axhline(y=0, color='black', linestyle='-', linewidth=0.5)
+                
+                # 2. Total Grid Buy
+                b_grid = baseline_df.groupby('household_id')['grid_buy'].sum()
+                o_grid = optimized_df.groupby('household_id')['grid_buy'].sum()
+                ax2.bar([i - width/2 for i in x], b_grid.values, width, label='Baseline', color='#e74c3c', alpha=0.8)
+                ax2.bar([i + width/2 for i in x], o_grid.values, width, label='Optimized', color='#27ae60', alpha=0.8)
+                ax2.set_xlabel('Household')
+                ax2.set_ylabel('Total Grid Buy (kWh)')
+                ax2.set_title('🔌 Grid Purchases by Household')
+                ax2.legend()
+                
+                # 3. Savings per household (bar chart)
+                savings = o_final['wallet'].values - b_final['wallet'].values
+                colors = ['#27ae60' if s >= 0 else '#e74c3c' for s in savings]
+                ax3.bar(x, savings, color=colors, alpha=0.8)
+                ax3.set_xlabel('Household')
+                ax3.set_ylabel('Savings ($)')
+                ax3.set_title('📈 Savings per Household (Optimized - Baseline)')
+                ax3.axhline(y=0, color='black', linestyle='-', linewidth=0.5)
+                ax3.axhline(y=savings.mean(), color='blue', linestyle='--', linewidth=1, label=f'Mean: ${savings.mean():.2f}')
+                ax3.legend()
+                
+                # 4. P2P Trading Volume (if available)
+                if 'p2p_buy_amount' in optimized_df.columns:
+                    p2p_buy = optimized_df.groupby('household_id')['p2p_buy_amount'].sum()
+                    p2p_sell = optimized_df.groupby('household_id')['p2p_sell_amount'].sum() if 'p2p_sell_amount' in optimized_df.columns else p2p_buy * 0
+                    ax4.bar([i - width/2 for i in x], p2p_buy.values, width, label='P2P Buy', color='#3498db', alpha=0.8)
+                    ax4.bar([i + width/2 for i in x], p2p_sell.values, width, label='P2P Sell', color='#9b59b6', alpha=0.8)
+                    ax4.set_xlabel('Household')
+                    ax4.set_ylabel('Energy (kWh)')
+                    ax4.set_title('🤝 P2P Trading Volume by Household')
+                    ax4.legend()
+                else:
+                    ax4.text(0.5, 0.5, 'No P2P data available', ha='center', va='center', transform=ax4.transAxes)
+                    ax4.set_title('🤝 P2P Trading Volume')
+            
+            self.comparison_fig.tight_layout()
+            self.comparison_canvas.draw()
+        
+        # Update metrics text
+        self._update_metrics_text()
+    
+    def _update_metrics_text(self) -> None:
+        """Update the key metrics text."""
+        if self.player is None:
+            return
+        
+        self.metrics_text.config(state=tk.NORMAL)
+        self.metrics_text.delete(1.0, tk.END)
+        
+        baseline_df = self.player.baseline_df
+        optimized_df = self.player.optimized_df
+        
+        if baseline_df.empty or optimized_df.empty:
+            self.metrics_text.insert(tk.END, "Load both baseline and optimized data for comparison.")
+            self.metrics_text.config(state=tk.DISABLED)
+            return
+        
+        text = ""
+        
+        # Community totals
+        b_wallet = baseline_df.groupby('household_id')['wallet'].last().sum()
+        o_wallet = optimized_df.groupby('household_id')['wallet'].last().sum()
+        b_grid_buy = baseline_df['grid_buy'].sum()
+        o_grid_buy = optimized_df['grid_buy'].sum()
+        
+        text += "═" * 45 + "\n"
+        text += "           COMMUNITY PERFORMANCE SUMMARY\n"
+        text += "═" * 45 + "\n\n"
+        
+        text += "💰 FINANCIAL METRICS\n"
+        text += "─" * 45 + "\n"
+        text += f"  Baseline Total Wallet:    ${b_wallet:>12.2f}\n"
+        text += f"  Optimized Total Wallet:   ${o_wallet:>12.2f}\n"
+        text += f"  Community Savings:        ${o_wallet - b_wallet:>+12.2f}\n"
+        improvement_pct = ((o_wallet - b_wallet) / abs(b_wallet) * 100) if b_wallet != 0 else 0
+        text += f"  Improvement:              {improvement_pct:>+12.1f}%\n\n"
+        
+        text += "⚡ ENERGY METRICS\n"
+        text += "─" * 45 + "\n"
+        text += f"  Baseline Grid Buy:        {b_grid_buy:>12.2f} kWh\n"
+        text += f"  Optimized Grid Buy:       {o_grid_buy:>12.2f} kWh\n"
+        grid_reduction = b_grid_buy - o_grid_buy
+        grid_pct = (grid_reduction / b_grid_buy * 100) if b_grid_buy > 0 else 0
+        text += f"  Grid Buy Reduction:       {grid_reduction:>+12.2f} kWh\n"
+        text += f"  Reduction:                {grid_pct:>12.1f}%\n\n"
+        
+        # P2P metrics
+        if 'p2p_buy_amount' in optimized_df.columns:
+            p2p_total = optimized_df['p2p_buy_amount'].sum()
+            text += "🤝 P2P TRADING\n"
+            text += "─" * 45 + "\n"
+            text += f"  Total P2P Volume:         {p2p_total:>12.2f} kWh\n"
+            p2p_pct = (p2p_total / (p2p_total + o_grid_buy) * 100) if (p2p_total + o_grid_buy) > 0 else 0
+            text += f"  P2P vs Total Energy:      {p2p_pct:>12.1f}%\n\n"
+        
+        # Self-sufficiency
+        total_consumption = optimized_df['consumption'].sum()
+        total_production = optimized_df['production'].sum()
+        self_sufficiency = ((total_consumption - o_grid_buy) / total_consumption * 100) if total_consumption > 0 else 0
+        
+        text += "🌱 SUSTAINABILITY\n"
+        text += "─" * 45 + "\n"
+        text += f"  Self-Sufficiency:         {self_sufficiency:>12.1f}%\n"
+        text += f"  Total Production:         {total_production:>12.2f} kWh\n"
+        text += f"  Total Consumption:        {total_consumption:>12.2f} kWh\n\n"
+        
+        # Equity analysis
+        households = optimized_df['household_id'].unique()
+        n_hh = len(households)
+        savings_list = []
+        for hh_id in households:
+            b_hh = baseline_df[baseline_df['household_id'] == hh_id]['wallet'].iloc[-1] if len(baseline_df[baseline_df['household_id'] == hh_id]) > 0 else 0
+            o_hh = optimized_df[optimized_df['household_id'] == hh_id]['wallet'].iloc[-1] if len(optimized_df[optimized_df['household_id'] == hh_id]) > 0 else 0
+            savings_list.append(o_hh - b_hh)
+        
+        if savings_list:
+            text += "📊 EQUITY ANALYSIS\n"
+            text += "─" * 45 + "\n"
+            text += f"  Number of Households:     {n_hh:>12}\n"
+            text += f"  Mean Savings:             ${sum(savings_list)/len(savings_list):>+11.2f}\n"
+            text += f"  Best Performer:           ${max(savings_list):>+11.2f}\n"
+            text += f"  Worst Performer:          ${min(savings_list):>+11.2f}\n"
+            text += f"  Savings Spread:           ${max(savings_list) - min(savings_list):>11.2f}\n"
+            
+            # Calculate Gini coefficient for equity
+            wallets = sorted([optimized_df[optimized_df['household_id'] == hh_id]['wallet'].iloc[-1] for hh_id in households])
+            n = len(wallets)
+            if n > 1 and sum(wallets) > 0:
+                gini_sum = sum((2*i - n - 1) * wallets[i] for i in range(n))
+                mean_wallet = sum(wallets) / n
+                gini = abs(gini_sum / (n * n * mean_wallet)) if mean_wallet > 0 else 0
+                equity_score = (1 - gini) * 100
+                text += f"  Equity Score:             {equity_score:>11.1f}%\n"
+                text += f"  (100% = perfect equality)\n"
+        
+        self.metrics_text.insert(tk.END, text)
+        self.metrics_text.config(state=tk.DISABLED)
+    
+    def _update_household_tab(self) -> None:
+        """Update the per-household comparison tab."""
+        if self.player is None or not HAS_MATPLOTLIB:
+            return
+        
+        self.household_fig.clear()
+        
+        baseline_df = self.player.baseline_df
+        optimized_df = self.player.optimized_df
+        
+        if baseline_df.empty or optimized_df.empty:
+            ax = self.household_fig.add_subplot(111)
+            ax.text(0.5, 0.5, 'Load both baseline and optimized data', ha='center', va='center')
+            self.household_canvas.draw()
+            return
+        
+        households = list(optimized_df['household_id'].unique())
+        n_hh = len(households)
+        
+        if n_hh == 0:
+            return
+        
+        # Create subplots - 2 rows: wallet evolution, savings breakdown
+        ax1 = self.household_fig.add_subplot(2, 1, 1)
+        ax2 = self.household_fig.add_subplot(2, 1, 2)
+        
+        # Color palette - use predefined colors
+        color_list = ['#1f77b4', '#ff7f0e', '#2ca02c', '#d62728', '#9467bd',
+                      '#8c564b', '#e377c2', '#7f7f7f', '#bcbd22', '#17becf']
+        
+        # Plot 1: Wallet evolution over time (all households)
+        for i, hh_id in enumerate(households[:10]):  # Limit to 10 for readability
+            hh_data = optimized_df[optimized_df['household_id'] == hh_id].sort_values('step')
+            color = color_list[i % len(color_list)]
+            ax1.plot(hh_data['step'], hh_data['wallet'], label=f'{str(hh_id)[:8]}', 
+                    color=color, linewidth=1.5, alpha=0.8)
+        
+        ax1.set_xlabel('Step')
+        ax1.set_ylabel('Wallet ($)')
+        ax1.set_title('💰 Wallet Evolution per Household (Optimized)')
+        ax1.legend(loc='upper left', fontsize=8, ncol=min(5, n_hh))
+        ax1.grid(True, alpha=0.3)
+        ax1.axhline(y=0, color='black', linestyle='-', linewidth=0.5)
+        
+        # Plot 2: Horizontal bar chart - savings ranking
+        savings_data = []
+        for hh_id in households:
+            b_hh = baseline_df[baseline_df['household_id'] == hh_id]
+            o_hh = optimized_df[optimized_df['household_id'] == hh_id]
+            
+            if not b_hh.empty and not o_hh.empty:
+                b_wallet = b_hh['wallet'].iloc[-1]
+                o_wallet = o_hh['wallet'].iloc[-1]
+                savings_data.append((str(hh_id)[:8], o_wallet - b_wallet, o_wallet))
+        
+        if savings_data:
+            # Sort by savings
+            savings_data.sort(key=lambda x: x[1], reverse=True)
+            labels = [d[0] for d in savings_data]
+            savings = [d[1] for d in savings_data]
+            
+            colors_bar = ['#27ae60' if s >= 0 else '#e74c3c' for s in savings]
+            y_pos = np.arange(len(labels))
+            
+            ax2.barh(y_pos, savings, color=colors_bar, alpha=0.8)
+            ax2.set_yticks(y_pos)
+            ax2.set_yticklabels(labels)
+            ax2.set_xlabel('Savings ($)')
+            ax2.set_title('📈 Savings Ranking (Optimized - Baseline)')
+            ax2.axvline(x=0, color='black', linestyle='-', linewidth=0.5)
+            
+            # Add value labels
+            for i, (label, val, _) in enumerate(savings_data):
+                ax2.text(val, i, f' ${val:+.2f}', va='center', fontsize=8)
+        
+        self.household_fig.tight_layout()
+        self.household_canvas.draw()
+        
+        self.household_info_label.config(text=f"Showing {n_hh} households. Best saver: ${max(savings) if savings_data else 0:+.2f}")
     
     def _create_plot_configs(self):
         """Create plot configurations with CI support."""
@@ -968,7 +1291,7 @@ class VisualizerApp(tk.Tk):
         
         # Update plots
         for panel in self.plot_panels.values():
-            if panel.config.enabled:
+            if panel.plot_config.enabled:
                 panel.update_data(baseline_agg, optimized_agg, baseline_stats, optimized_stats)
         
         # Update network
@@ -980,6 +1303,11 @@ class VisualizerApp(tk.Tk):
         
         all_data = self.player.baseline_df if view_type == "baseline" else self.player.optimized_df
         self.network_panel.update_network(step_data, all_data)
+        
+        # Update analysis tabs when at final step or first load
+        if step == self.player.max_step or step == 0:
+            self._update_analysis_tab()
+            self._update_household_tab()
 
 
 def main():

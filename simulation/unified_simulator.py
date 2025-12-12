@@ -4,7 +4,7 @@ Supports synchronized execution and data collection for visualization.
 """
 import pandas as pd
 from collections import defaultdict
-from typing import Generator, Literal
+from typing import Generator
 from dataclasses import dataclass
 
 from simulation.params import SimulationParams, DEFAULT_PARAMS
@@ -14,6 +14,7 @@ from simulation.household import Household
 from simulation.blockchain import Blockchain
 from simulation.forecaster.perfect_forecaster import PerfectForecaster
 from simulation.optimizer.convex_optimizer import ConvexOptimizer
+from simulation.optimizer.greedy_optimizer import GreedyOptimizer
 from simulation.battery.simple_battery import SimpleBattery
 from simulation.battery.central_battery import CentralBattery
 from simulation.battery.shared_battery import SharedBattery
@@ -49,6 +50,9 @@ class UnifiedSimulator:
         self.household_data = household_data
         self.data_collector = data_collector or SimulationDataCollector()
         
+        # Validate that we have enough data for the requested simulation
+        self._validate_data_availability()
+        
         # Create grid capacity data based on settings
         if not self.params.grid_capacity.use_capacity_limits:
             # No capacity limits - use very large values
@@ -72,11 +76,44 @@ class UnifiedSimulator:
         # Initialize components for both simulations
         self._init_baseline_components()
         self._init_optimized_components()
+    
+    def _validate_data_availability(self) -> None:
+        """Validate that household data has enough samples for the simulation."""
+        if self.household_data.empty:
+            raise ValueError("Household data is empty")
+        
+        # Calculate required samples based on time_step_hours
+        samples_per_step = max(1, int(self.params.time_step_hours * 4))  # 4 samples per hour (15min data)
+        required_samples = self.params.simulation_steps * samples_per_step
+        
+        # Check first household to see data length
+        first_household = self.household_data.groupby("id").first()
+        if len(first_household) == 0:
+            raise ValueError("No household data available")
+        
+        # Count available samples (assume all households have same length)
+        sample_household = self.household_data.groupby("id").get_group(first_household.index[0])
+        available_samples = len(sample_household)
+        
+        if available_samples < required_samples:
+            max_possible_steps = available_samples // samples_per_step
+            logger.warning(
+                f"Insufficient data: {available_samples} samples available, "
+                f"{required_samples} required for {self.params.simulation_steps} steps "
+                f"with {self.params.time_step_hours}h per step. "
+                f"Maximum possible steps: {max_possible_steps}. "
+                f"Adjusting simulation_steps to {max_possible_steps}."
+            )
+            self.params.simulation_steps = max_possible_steps
         
     def _prepare_household_data(self) -> dict[str, dict]:
         """Process raw household data into usable format."""
         grouped = self.household_data.groupby("id")
         processed = {}
+        
+        # Calculate samples per step based on time_step_hours
+        # Raw data is 15-minute intervals (96 samples = 24 hours)
+        samples_per_step = max(1, int(self.params.time_step_hours * 4))  # 4 samples per hour
         
         for household_id, group in grouped:
             group = group.drop(columns=["id", "timestamp", "category", "season", "period"], errors='ignore')
@@ -87,10 +124,16 @@ class UnifiedSimulator:
                 if key == 'production':
                     val = [x * self.params.household.production_scale_factor for x in val]
                 
-                # Aggregate daily data (96 x 15min = 1 day)
-                for i in range(0, len(val) - 96, 96):
-                    day_sum = sum(val[i:i + 96])
-                    data_dict[key].append(day_sum)
+                # Aggregate data based on time_step_hours parameter
+                # For 15min steps: samples_per_step=1, for 1h: 4, for 24h: 96
+                if samples_per_step == 1:
+                    # No aggregation needed - use raw 15-minute data
+                    data_dict[key] = val
+                else:
+                    # Aggregate into time steps
+                    for i in range(0, len(val) - samples_per_step + 1, samples_per_step):
+                        step_sum = sum(val[i:i + samples_per_step])
+                        data_dict[key].append(step_sum)
             
             processed[str(household_id)] = dict(data_dict)
             
@@ -116,7 +159,8 @@ class UnifiedSimulator:
                 battery = SimpleBattery(
                     capacity_in_kwh=self.params.battery.simple_capacity_kwh,
                     charge_efficiency=self.params.battery.simple_charge_efficiency,
-                    discharge_efficiency=self.params.battery.simple_discharge_efficiency
+                    discharge_efficiency=self.params.battery.simple_discharge_efficiency,
+                    initial_charge_kwh=self.params.battery.simple_initial_charge_kwh
                 )
             
             hh = Household(id=hh_id, data=data, battery=battery)
@@ -134,7 +178,7 @@ class UnifiedSimulator:
             tax_per_kwh=self.params.battery.central_tax_per_kwh
         )
         self.baseline_households = self._create_households(self.baseline_central_battery)
-        self.baseline_price_forecaster = SimpleCityGridPriceForecaster()
+        self.baseline_price_forecaster = SimpleCityGridPriceForecaster(self.params.grid_price)
     
     def _init_optimized_components(self) -> None:
         """Initialize optimized simulation components."""
@@ -145,17 +189,34 @@ class UnifiedSimulator:
             tax_per_kwh=self.params.battery.central_tax_per_kwh
         )
         self.optimized_households = self._create_households(self.optimized_central_battery)
-        self.blockchain = Blockchain()
+        self.blockchain = Blockchain(history_size=self.params.forecaster.history_size)
         self.forecaster = PerfectForecaster()
-        self.optimizer = ConvexOptimizer(
-            p2p_transaction_cost=self.params.optimizer.p2p_transaction_cost,
-            min_trade_threshold=self.params.optimizer.min_trade_threshold,
-            solver=self.params.optimizer.solver,
-            warm_start=self.params.optimizer.warm_start
-        )
-        self.optimized_price_forecaster = SimpleCityGridPriceForecaster()
+        
+        # Create optimizer based on type
+        if self.params.optimizer.optimizer_type.lower() == "greedy":
+            self.optimizer = GreedyOptimizer(
+                p2p_transaction_cost=self.params.optimizer.p2p_transaction_cost,
+                min_trade_threshold=self.params.optimizer.min_trade_threshold,
+                max_neighbors=self.params.optimizer.max_neighbors,
+                battery_target_pct=self.params.optimizer.battery_target_pct,
+                p2p_price_factor=self.params.optimizer.p2p_price_factor,
+            )
+        else:  # "convex"
+            self.optimizer = ConvexOptimizer(
+                p2p_transaction_cost=self.params.optimizer.p2p_transaction_cost,
+                min_trade_threshold=self.params.optimizer.min_trade_threshold,
+                solver=self.params.optimizer.solver,
+                warm_start=self.params.optimizer.warm_start,
+                max_neighbors=self.params.optimizer.max_neighbors,
+                battery_charge_rate_factor=self.params.optimizer.battery_charge_rate_factor,
+                wallet_penalty_weight=self.params.optimizer.wallet_penalty_weight
+            )
+        
+        self.optimized_price_forecaster = SimpleCityGridPriceForecaster(self.params.grid_price)
         self.token_to_battery = TokenToBattery()
-        self.local_price_estimator = PriceEstimator()
+        self.local_price_estimator = PriceEstimator(
+            p2p_price_factor=self.params.optimizer.p2p_price_factor
+        )
     
     def run_baseline_step(self, step: int) -> SimulationState:
         """Execute one step of baseline simulation."""
@@ -321,12 +382,13 @@ class UnifiedSimulator:
         self.blockchain.add_trades(finalized_offers)
         
         # Execute trades
+        grid_buy_price = city_price_forecast["buy"][0]
         local_price = self.local_price_estimator.calculate_price(
-            overall["production"], overall["consumption"]
+            overall["production"], overall["consumption"], grid_buy_price
         )
         self.blockchain.trade_event(
             local_energy_price=local_price,
-            city_buy_price=city_price_forecast["buy"][0],
+            city_buy_price=grid_buy_price,
             city_sell_price=city_price_forecast["sell"][0]
         )
         
