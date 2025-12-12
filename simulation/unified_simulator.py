@@ -14,6 +14,7 @@ from simulation.household import Household
 from simulation.blockchain import Blockchain
 from simulation.forecaster.perfect_forecaster import PerfectForecaster
 from simulation.optimizer.convex_optimizer import ConvexOptimizer
+from simulation.optimizer.greedy_optimizer import GreedyOptimizer
 from simulation.battery.simple_battery import SimpleBattery
 from simulation.battery.central_battery import CentralBattery
 from simulation.battery.shared_battery import SharedBattery
@@ -147,15 +148,30 @@ class UnifiedSimulator:
         self.optimized_households = self._create_households(self.optimized_central_battery)
         self.blockchain = Blockchain()
         self.forecaster = PerfectForecaster()
-        self.optimizer = ConvexOptimizer(
-            p2p_transaction_cost=self.params.optimizer.p2p_transaction_cost,
-            min_trade_threshold=self.params.optimizer.min_trade_threshold,
-            solver=self.params.optimizer.solver,
-            warm_start=self.params.optimizer.warm_start
-        )
+        
+        # Create optimizer based on type
+        if self.params.optimizer.optimizer_type.lower() == "greedy":
+            self.optimizer = GreedyOptimizer(
+                p2p_transaction_cost=self.params.optimizer.p2p_transaction_cost,
+                min_trade_threshold=self.params.optimizer.min_trade_threshold,
+                max_neighbors=self.params.optimizer.max_neighbors,
+                battery_target_pct=self.params.optimizer.battery_target_pct,
+                p2p_price_factor=self.params.optimizer.p2p_price_factor,
+            )
+        else:  # "convex"
+            self.optimizer = ConvexOptimizer(
+                p2p_transaction_cost=self.params.optimizer.p2p_transaction_cost,
+                min_trade_threshold=self.params.optimizer.min_trade_threshold,
+                solver=self.params.optimizer.solver,
+                warm_start=self.params.optimizer.warm_start,
+                max_neighbors=self.params.optimizer.max_neighbors
+            )
+        
         self.optimized_price_forecaster = SimpleCityGridPriceForecaster()
         self.token_to_battery = TokenToBattery()
-        self.local_price_estimator = PriceEstimator()
+        self.local_price_estimator = PriceEstimator(
+            p2p_price_factor=self.params.optimizer.p2p_price_factor
+        )
     
     def run_baseline_step(self, step: int) -> SimulationState:
         """Execute one step of baseline simulation."""
@@ -321,12 +337,13 @@ class UnifiedSimulator:
         self.blockchain.add_trades(finalized_offers)
         
         # Execute trades
+        grid_buy_price = city_price_forecast["buy"][0]
         local_price = self.local_price_estimator.calculate_price(
-            overall["production"], overall["consumption"]
+            overall["production"], overall["consumption"], grid_buy_price
         )
         self.blockchain.trade_event(
             local_energy_price=local_price,
-            city_buy_price=city_price_forecast["buy"][0],
+            city_buy_price=grid_buy_price,
             city_sell_price=city_price_forecast["sell"][0]
         )
         
